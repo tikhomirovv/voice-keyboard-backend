@@ -6,6 +6,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 	"gitlab.com/voice-keyboard/backend-go/commands/application"
+	"gitlab.com/voice-keyboard/backend-go/commands/database"
 )
 
 func main() {
@@ -13,6 +14,8 @@ func main() {
 		Name: "voice-key-backend-go",
 		Commands: []*cli.Command{
 			application.NewApplicationStartCommand(),
+			database.NewDatabaseMigrateCommand(),
+			database.NewDatabaseRollbackCommand(),
 		},
 	}
 
