@@ -4,6 +4,7 @@
 package bootstrap
 
 import (
+	"github.com/go-playground/validator/v10"
 	"github.com/google/wire"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
@@ -32,16 +33,30 @@ func InitializeDatabase(cfg *pkg.Config) (*gorm.DB, error) {
 	return &gorm.DB{}, nil
 }
 
+func InitializeValidator() (*validator.Validate, error) {
+	wire.Build(pkg.NewValidator)
+	return &validator.Validate{}, nil
+}
+
+func InitializeEmailer(cfg *pkg.Config, logger logger.Logger) (*pkg.Emailer, error) {
+	wire.Build(pkg.NewEmailer)
+	return &pkg.Emailer{}, nil
+}
+
 func InitializeContainer(configPath string) (*pkg.Container, error) {
 	wire.Build(
 		InitializeConfig,
 		ProvideLogLevel,
 		InitializeLogger,
 		InitializeDatabase,
+		InitializeValidator,
+		InitializeEmailer,
 		wire.Struct(new(pkg.Container),
 			"Config",
 			"Logger",
 			"DB",
+			"Validator",
+			"Emailer",
 		),
 	)
 	return &pkg.Container{}, nil

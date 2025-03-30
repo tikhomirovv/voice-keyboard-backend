@@ -16,6 +16,7 @@ type Config struct {
 	Cors       CorsConfig       `mapstructure:"cors"`
 	Prometheus PrometheusConfig `mapstructure:"prometheus"`
 	Database   DatabaseConfig   `mapstructure:"database"`
+	Auth       AuthConfig       `mapstructure:"auth"`
 }
 
 type AppConfig struct {
@@ -51,6 +52,12 @@ type DatabaseConfig struct {
 	MaxConnectionIdleTime int    `mapstructure:"max_connection_idle_time"`
 	SslMode               string `mapstructure:"ssl_mode"`
 	PreparedStatement     bool   `mapstructure:"prepared_statement"`
+}
+
+type AuthConfig struct {
+	Secret                string `mapstructure:"secret"`
+	TokenTtl              int    `mapstructure:"token_ttl"`
+	ResetPasswordTokenTtl int    `mapstructure:"reset_password_token_ttl"`
 }
 
 func (c *Config) GetAppPort() string {

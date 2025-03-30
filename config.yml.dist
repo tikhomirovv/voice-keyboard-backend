@@ -4,9 +4,6 @@ app:
   debug: true
   prefork: false # multi-process mode
 
-prometheus:
-  port: 8090
-
 cors:
   enabled: true
   allow_origin: '*'
@@ -27,3 +24,8 @@ database:
   max_connection_idle_time: 60
   ssl_mode: disable
   prepared_statement: true
+
+auth:
+  secret: "secret"
+  token_ttl: 900 # secs
+  reset_password_token_ttl: 900 # secs

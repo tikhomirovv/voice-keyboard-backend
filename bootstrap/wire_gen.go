@@ -7,6 +7,7 @@
 package bootstrap
 
 import (
+	"github.com/go-playground/validator/v10"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 	"gorm.io/gorm"
@@ -35,6 +36,19 @@ func InitializeDatabase(cfg *pkg.Config) (*gorm.DB, error) {
 	return db, nil
 }
 
+func InitializeValidator() (*validator.Validate, error) {
+	validate, err := pkg.NewValidator()
+	if err != nil {
+		return nil, err
+	}
+	return validate, nil
+}
+
+func InitializeEmailer(cfg *pkg.Config, logger2 logger.Logger) (*pkg.Emailer, error) {
+	emailer := pkg.NewEmailer(cfg, logger2)
+	return emailer, nil
+}
+
 func InitializeContainer(configPath string) (*pkg.Container, error) {
 	config, err := InitializeConfig(configPath)
 	if err != nil {
@@ -46,10 +60,20 @@ func InitializeContainer(configPath string) (*pkg.Container, error) {
 	if err != nil {
 		return nil, err
 	}
+	validate, err := InitializeValidator()
+	if err != nil {
+		return nil, err
+	}
+	emailer, err := InitializeEmailer(config, loggerLogger)
+	if err != nil {
+		return nil, err
+	}
 	container := &pkg.Container{
-		Config: config,
-		Logger: loggerLogger,
-		DB:     db,
+		Config:    config,
+		Logger:    loggerLogger,
+		DB:        db,
+		Validator: validate,
+		Emailer:   emailer,
 	}
 	return container, nil
 }
