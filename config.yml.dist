@@ -1,0 +1,29 @@
+app:
+  name: voice-key-backend-go
+  port: 8080
+  debug: true
+  prefork: false # multi-process mode
+
+prometheus:
+  port: 8090
+
+cors:
+  enabled: true
+  allow_origin: '*'
+  allow_methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
+  allow_headers: X-Requested-With, Content-Type, Accept, Origin, Authorization
+  expose_headers: X-Requested-With, Content-Type, Accept, Origin, Authorization
+
+database:
+  host: 127.0.0.1
+  port: 5437
+  name: voice-key
+  user: voice-key
+  password: 12345
+  connect_timeout: 5
+  max_connections: 10
+  max_idle_connections: 10
+  max_connection_lifetime: 60
+  max_connection_idle_time: 60
+  ssl_mode: disable
+  prepared_statement: true
