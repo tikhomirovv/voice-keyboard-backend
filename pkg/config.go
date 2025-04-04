@@ -12,19 +12,21 @@ import (
 )
 
 type Config struct {
-	App        AppConfig        `mapstructure:"app"`
-	Cors       CorsConfig       `mapstructure:"cors"`
-	Prometheus PrometheusConfig `mapstructure:"prometheus"`
-	Database   DatabaseConfig   `mapstructure:"database"`
-	Auth       AuthConfig       `mapstructure:"auth"`
+	App         AppConfig         `mapstructure:"app"`
+	Cors        CorsConfig        `mapstructure:"cors"`
+	Prometheus  PrometheusConfig  `mapstructure:"prometheus"`
+	Database    DatabaseConfig    `mapstructure:"database"`
+	Auth        AuthConfig        `mapstructure:"auth"`
+	YandexOAuth YandexOAuthConfig `mapstructure:"yandex_oauth"`
 }
 
 type AppConfig struct {
-	Name     string
-	Instance string
-	Port     uint
-	Debug    bool
-	Prefork  bool
+	BaseUrl  string `mapstructure:"base_url"`
+	Name     string `mapstructure:"name"`
+	Instance string `mapstructure:"instance"`
+	Port     uint   `mapstructure:"port"`
+	Debug    bool   `mapstructure:"debug"`
+	Prefork  bool   `mapstructure:"prefork"`
 }
 
 type CorsConfig struct {
@@ -60,6 +62,15 @@ type AuthConfig struct {
 	ResetPasswordTokenTtl int    `mapstructure:"reset_password_token_ttl"`
 }
 
+type YandexOAuthConfig struct {
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectPath string `mapstructure:"redirect_path"`
+	AuthURL      string `mapstructure:"auth_url"`
+	TokenURL     string `mapstructure:"token_url"`
+	UserInfoURL  string `mapstructure:"user_info_url"`
+}
+
 func (c *Config) GetAppPort() string {
 	return fmt.Sprintf(":%d", c.App.Port)
 }
@@ -85,6 +96,20 @@ func (c *Config) GetDatabaseDsnUrl() string {
 	values.Set("application_name", c.App.Instance)
 	dsnUrl.RawQuery = values.Encode()
 	return dsnUrl.String()
+}
+
+func (c *Config) BuildSiteUrl(path string, queryParams map[string]string) (string, error) {
+	u, err := url.Parse(c.App.BaseUrl)
+	if err != nil {
+		return "", fmt.Errorf("Config.buildSiteUrl: %w", err)
+	}
+	u.Path = path
+	query := u.Query()
+	for key, value := range queryParams {
+		query.Set(key, value)
+	}
+	u.RawQuery = query.Encode()
+	return u.String(), nil
 }
 
 func NewConfig(configPath string) (*Config, error) {

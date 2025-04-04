@@ -8,6 +8,9 @@ package bootstrap
 
 import (
 	"github.com/go-playground/validator/v10"
+	"github.com/google/wire"
+	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
+	"gitlab.com/voice-keyboard/backend-go/internal/services"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 	"gorm.io/gorm"
@@ -49,6 +52,11 @@ func InitializeEmailer(cfg *pkg.Config, logger2 logger.Logger) (*pkg.Emailer, er
 	return emailer, nil
 }
 
+func InitializeAPIErrorHandler(logger2 logger.Logger) (*pkg.APIErrorHandler, error) {
+	apiErrorHandler := pkg.NewAPIErrorHandler(logger2)
+	return apiErrorHandler, nil
+}
+
 func InitializeContainer(configPath string) (*pkg.Container, error) {
 	config, err := InitializeConfig(configPath)
 	if err != nil {
@@ -60,20 +68,29 @@ func InitializeContainer(configPath string) (*pkg.Container, error) {
 	if err != nil {
 		return nil, err
 	}
-	validate, err := InitializeValidator()
-	if err != nil {
-		return nil, err
-	}
 	emailer, err := InitializeEmailer(config, loggerLogger)
 	if err != nil {
 		return nil, err
 	}
+	validate, err := InitializeValidator()
+	if err != nil {
+		return nil, err
+	}
+	apiErrorHandler, err := InitializeAPIErrorHandler(loggerLogger)
+	if err != nil {
+		return nil, err
+	}
+	yandexOAuthService := services.NewYandexOAuthService(config, loggerLogger)
+	authService := services.NewAuthService(db, config, loggerLogger, emailer, yandexOAuthService)
 	container := &pkg.Container{
-		Config:    config,
-		Logger:    loggerLogger,
-		DB:        db,
-		Validator: validate,
-		Emailer:   emailer,
+		Config:             config,
+		Logger:             loggerLogger,
+		DB:                 db,
+		Emailer:            emailer,
+		Validator:          validate,
+		ErrorHandler:       apiErrorHandler,
+		AuthService:        authService,
+		YandexOAuthService: yandexOAuthService,
 	}
 	return container, nil
 }
@@ -86,3 +103,5 @@ func ProvideLogLevel(cfg *pkg.Config) logger.LogLevel {
 	}
 	return "info"
 }
+
+var ServiceSet = wire.NewSet(services.NewYandexOAuthService, wire.Bind(new(interfaces.YandexOAuthServiceInterface), new(*services.YandexOAuthService)), services.NewAuthService, wire.Bind(new(interfaces.AuthServiceInterface), new(*services.AuthService)))

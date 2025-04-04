@@ -6,6 +6,8 @@ package bootstrap
 import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/wire"
+	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
+	"gitlab.com/voice-keyboard/backend-go/internal/services"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 	"gorm.io/gorm"
@@ -43,6 +45,18 @@ func InitializeEmailer(cfg *pkg.Config, logger logger.Logger) (*pkg.Emailer, err
 	return &pkg.Emailer{}, nil
 }
 
+func InitializeAPIErrorHandler(logger logger.Logger) (*pkg.APIErrorHandler, error) {
+	wire.Build(pkg.NewAPIErrorHandler)
+	return &pkg.APIErrorHandler{}, nil
+}
+
+var ServiceSet = wire.NewSet(
+	services.NewYandexOAuthService,
+	wire.Bind(new(interfaces.YandexOAuthServiceInterface), new(*services.YandexOAuthService)),
+	services.NewAuthService,
+	wire.Bind(new(interfaces.AuthServiceInterface), new(*services.AuthService)),
+)
+
 func InitializeContainer(configPath string) (*pkg.Container, error) {
 	wire.Build(
 		InitializeConfig,
@@ -51,13 +65,9 @@ func InitializeContainer(configPath string) (*pkg.Container, error) {
 		InitializeDatabase,
 		InitializeValidator,
 		InitializeEmailer,
-		wire.Struct(new(pkg.Container),
-			"Config",
-			"Logger",
-			"DB",
-			"Validator",
-			"Emailer",
-		),
+		InitializeAPIErrorHandler,
+		ServiceSet,
+		wire.Struct(new(pkg.Container), "*"),
 	)
 	return &pkg.Container{}, nil
 }

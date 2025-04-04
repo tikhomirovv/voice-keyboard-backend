@@ -21,3 +21,7 @@ type UserSocialAuth struct {
 
 	User User `gorm:"foreignKey:UserID" json:"-"`
 }
+
+func (UserSocialAuth) TableName() string {
+	return "users_social_auths"
+}

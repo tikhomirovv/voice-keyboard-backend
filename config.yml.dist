@@ -1,4 +1,5 @@
 app:
+  base_url: "http://localhost:8080"
   name: voice-key-backend-go
   port: 8080
   debug: true
@@ -29,3 +30,11 @@ auth:
   secret: "secret"
   token_ttl: 900 # secs
   reset_password_token_ttl: 900 # secs
+
+yandex_oauth:
+  client_id: "client_id"
+  client_secret: "client_secret"
+  redirect_path: "/auth/yandex/callback"
+  auth_url: "https://oauth.yandex.ru/authorize"
+  token_url: "https://oauth.yandex.ru/token"
+  user_info_url: "https://login.yandex.ru/info"

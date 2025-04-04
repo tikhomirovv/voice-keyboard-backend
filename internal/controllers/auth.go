@@ -8,7 +8,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"gitlab.com/voice-keyboard/backend-go/internal/auth"
 	"gitlab.com/voice-keyboard/backend-go/internal/dto"
-	"gitlab.com/voice-keyboard/backend-go/internal/services"
+	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 )
@@ -17,7 +17,8 @@ type AuthController struct {
 	vl  *validator.Validate
 	ut  ut.Translator
 	log logger.Logger
-	as  *services.AuthService
+	as  interfaces.AuthServiceInterface
+	yo  interfaces.YandexOAuthServiceInterface
 }
 
 func (ac *AuthController) RefreshTokensPairAction(c *fiber.Ctx) error {
@@ -86,16 +87,15 @@ func RegisterAuthController(router fiber.Router, container *pkg.Container) {
 	ctrl := NewAuthController(container)
 	router.Post("/refresh", ctrl.RefreshTokensPairAction)
 	router.Put("/signout", ctrl.SignOutAction)
-	router.Post("/social/signin", ctrl.SignInWithSocialAction)
 }
 
 func NewAuthController(cnt *pkg.Container) *AuthController {
-	as := services.NewAuthService(cnt.DB, cnt.Config, cnt.Logger, cnt.Emailer)
 	uti, _ := pkg.NewValidatorTranslator(cnt.Validator)
 	return &AuthController{
 		vl:  cnt.Validator,
 		ut:  uti,
 		log: cnt.Logger,
-		as:  as,
+		as:  cnt.AuthService,
+		yo:  cnt.YandexOAuthService,
 	}
 }

@@ -14,17 +14,22 @@ import (
 	"gitlab.com/voice-keyboard/backend-go/internal/database/models"
 	"gitlab.com/voice-keyboard/backend-go/internal/database/repositories"
 	"gitlab.com/voice-keyboard/backend-go/internal/dto"
+	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 	"gorm.io/gorm"
 )
 
 type AuthService struct {
-	db  *gorm.DB
-	cfg *pkg.Config
-	log logger.Logger
-	em  *pkg.Emailer
+	db          *gorm.DB
+	cfg         *pkg.Config
+	log         logger.Logger
+	em          *pkg.Emailer
+	yandexOAuth interfaces.YandexOAuthServiceInterface
 }
+
+// Убедимся что AuthService реализует интерфейс
+var _ interfaces.AuthServiceInterface = (*AuthService)(nil)
 
 func (as *AuthService) RefreshTokensPair(ctx context.Context, refresh *dto.RefreshTokensPairDTO) (*dto.UserTokenDTO, error) {
 	usersTokensRep := repositories.NewUsersTokensRepository(as.db)
@@ -200,11 +205,18 @@ func (as *AuthService) LinkSocialAccount(ctx context.Context, userID uint64, soc
 	return nil
 }
 
-func NewAuthService(db *gorm.DB, cfg *pkg.Config, log logger.Logger, em *pkg.Emailer) *AuthService {
+func NewAuthService(
+	db *gorm.DB,
+	cfg *pkg.Config,
+	log logger.Logger,
+	em *pkg.Emailer,
+	yandexOAuth interfaces.YandexOAuthServiceInterface,
+) *AuthService {
 	return &AuthService{
-		db:  db,
-		cfg: cfg,
-		log: log,
-		em:  em,
+		db:          db,
+		cfg:         cfg,
+		log:         log,
+		em:          em,
+		yandexOAuth: yandexOAuth,
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"github.com/urfave/cli/v2"
 	"gitlab.com/voice-keyboard/backend-go/bootstrap"
 	"gitlab.com/voice-keyboard/backend-go/healthcheck"
+	"gitlab.com/voice-keyboard/backend-go/internal/controllers"
+	"gitlab.com/voice-keyboard/backend-go/internal/routers"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 )
 
@@ -34,10 +36,18 @@ func NewApplicationStartCommand() *cli.Command {
 			logger := container.Logger
 
 			app := pkg.NewApp(container)
-			mainRouter := app.Group("/api")
-			// apiV1Router := mainRouter.Group("/v1")
+			// public router
+			publicRouter := app.Group("/")
+			controllers.RegisterPublicController(publicRouter, container)
 
+			// api router
+			mainRouter := app.Group("/api")
 			healthcheck.RegisterHealthCheckController(mainRouter, container)
+
+			// api v1 router
+			apiV1Router := mainRouter.Group("/v1")
+			authRouter := routers.NewAuthRouter(apiV1Router, container)
+			controllers.RegisterAuthController(authRouter, container)
 
 			logger.Info(fmt.Sprintf(`%s instance "%s" started`, config.App.Name, config.App.Instance))
 			// Listen web app
