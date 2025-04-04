@@ -15,7 +15,5 @@ type AuthServiceInterface interface {
 // YandexOAuthServiceInterface определяет методы для работы с Яндекс OAuth
 type YandexOAuthServiceInterface interface {
 	GetAuthorizationURL(state string) string
-	GetUserInfoByCode(ctx context.Context, code string) (*dto.YandexUserInfo, error)
-	ExchangeCodeForToken(ctx context.Context, code string) (*dto.YandexTokenResponse, error)
-	GetUserInfo(ctx context.Context, accessToken string) (*dto.YandexUserInfo, error)
+	GetSocialAuthByCode(ctx context.Context, code string) (*dto.SocialAuthDTO, error)
 }

@@ -51,6 +51,13 @@ func (r *UserSocialAuthsRepository) Delete(ctx context.Context, auth *models.Use
 	return nil
 }
 
+func (r *UserSocialAuthsRepository) Update(ctx context.Context, auth *models.UserSocialAuth) error {
+	if err := r.db.WithContext(ctx).Save(auth).Error; err != nil {
+		return fmt.Errorf("UserSocialAuthsRepository.Update: %w", err)
+	}
+	return nil
+}
+
 func NewUserSocialAuthsRepository(db *gorm.DB) *UserSocialAuthsRepository {
 	return &UserSocialAuthsRepository{db: db}
 }

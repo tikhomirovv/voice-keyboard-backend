@@ -65,7 +65,7 @@ func (s *YandexOAuthService) GetAuthorizationURL(state string) string {
 }
 
 // ExchangeCodeForToken обменивает код авторизации на токен
-func (s *YandexOAuthService) ExchangeCodeForToken(ctx context.Context, code string) (*dto.YandexTokenResponse, error) {
+func (s *YandexOAuthService) exchangeCodeForToken(ctx context.Context, code string) (*dto.YandexTokenResponse, error) {
 	data := url.Values{}
 	data.Set("grant_type", "authorization_code")
 	data.Set("code", code)
@@ -106,7 +106,7 @@ func (s *YandexOAuthService) ExchangeCodeForToken(ctx context.Context, code stri
 }
 
 // GetUserInfo получает информацию о пользователе из API Яндекса
-func (s *YandexOAuthService) GetUserInfo(ctx context.Context, accessToken string) (*dto.YandexUserInfo, error) {
+func (s *YandexOAuthService) getUserInfo(ctx context.Context, accessToken string) (*dto.YandexUserInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", s.config.UserInfoURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("YandexOAuthService.GetUserInfo: create user info request: %w", err)
@@ -132,20 +132,46 @@ func (s *YandexOAuthService) GetUserInfo(ctx context.Context, accessToken string
 	return &userInfo, nil
 }
 
-func (s *YandexOAuthService) GetUserInfoByCode(ctx context.Context, code string) (*dto.YandexUserInfo, error) {
+func (s *YandexOAuthService) GetSocialAuthByCode(ctx context.Context, code string) (*dto.SocialAuthDTO, error) {
 	// Обмениваем код на токен
-	token, err := s.ExchangeCodeForToken(ctx, code)
+	token, err := s.exchangeCodeForToken(ctx, code)
 	if err != nil {
-		return nil, fmt.Errorf("YandexOAuthService.GetUserInfoByCode: exchange code for token: %w", err)
+		return nil, fmt.Errorf("YandexOAuthService.GetSocialAuthByCode: exchange code for token: %w", err)
 	}
-	s.log.Debug("YandexOAuthService.GetUserInfoByCode", "token", token)
+	s.log.Debug("YandexOAuthService.GetSocialAuthByCode", "token", token)
 
 	// Получаем информацию о пользователе из Яндекса
-	userInfo, err := s.GetUserInfo(ctx, token.AccessToken)
+	userInfo, err := s.getUserInfo(ctx, token.AccessToken)
 	if err != nil {
-		return nil, fmt.Errorf("YandexOAuthService.GetUserInfoByCode: get user info: %w", err)
+		return nil, fmt.Errorf("YandexOAuthService.GetSocialAuthByCode: get user info: %w", err)
 	}
-	s.log.Debug("YandexOAuthService.GetUserInfoByCode", "userInfo", userInfo)
+	s.log.Debug("YandexOAuthService.GetSocialAuthByCode", "userInfo", userInfo)
 
-	return userInfo, nil
+	// Создаем DTO для авторизации
+	providerData, err := json.Marshal(map[string]any{
+		"name":      userInfo.Name,
+		"login":     userInfo.Login,
+		"avatar":    userInfo.AvatarURL,
+		"real_name": userInfo.RealName,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("YandexOAuthService.GetSocialAuthByCode: marshal provider data: %w", err)
+	}
+
+	name := userInfo.Name
+	if name == "" {
+		name = userInfo.RealName
+	}
+	if name == "" {
+		name = userInfo.Login
+	}
+	socialAuthDTO := &dto.SocialAuthDTO{
+		Provider:       "yandex",
+		ProviderUserID: userInfo.ID,
+		Name:           name,
+		Email:          userInfo.Email,
+		ProviderData:   providerData,
+	}
+
+	return socialAuthDTO, nil
 }

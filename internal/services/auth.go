@@ -90,7 +90,6 @@ func (as *AuthService) generateUserTokensPair(userToken *models.UserToken) (*dto
 	res := &dto.UserTokenDTO{
 		AccessToken:  t,
 		RefreshToken: userToken.RefreshToken,
-		Type:         "Bearer",
 	}
 	return res, nil
 }
@@ -129,14 +128,30 @@ func (as *AuthService) generateNewRefreshTokenString() string {
 // SignInWithSocial аутентифицирует пользователя через социальную сеть
 func (as *AuthService) SignInWithSocial(ctx context.Context, socialData *dto.SocialAuthDTO) (*dto.UserTokenDTO, error) {
 	socialAuthsRepo := repositories.NewUserSocialAuthsRepository(as.db)
+	usersRepo := repositories.NewUsersRepository(as.db)
 
 	// Проверяем существующую привязку к соцсети по provider + provider_user_id
 	socialAuth, err := socialAuthsRepo.FindByProviderAndID(ctx, socialData.Provider, socialData.ProviderUserID)
 	if err == nil {
+		// Обновляем данные существующей привязки
+		socialAuth.ProviderEmail = socialData.Email
+		socialAuth.ProviderData = socialData.ProviderData
+		if err := socialAuthsRepo.Update(ctx, socialAuth); err != nil {
+			return nil, fmt.Errorf("SignInWithSocial: failed to update social auth: %w", err)
+		}
+
+		// Обновляем имя пользователя
+		if err := usersRepo.Update(ctx, &models.User{
+			ID:   socialAuth.UserID,
+			Name: socialData.Name,
+		}); err != nil {
+			return nil, fmt.Errorf("SignInWithSocial: failed to update user: %w", err)
+		}
+
 		// Нашли существующую привязку - авторизуем
 		userToken, err := as.generateAndSaveNewUserToken(ctx, as.db, socialAuth.UserID)
 		if err != nil {
-			return nil, fmt.Errorf("SignInWithSocial generate token: %w", err)
+			return nil, fmt.Errorf("SignInWithSocial: generate token: %w", err)
 		}
 		return as.generateUserTokensPair(userToken)
 	}
@@ -149,7 +164,7 @@ func (as *AuthService) SignInWithSocial(ctx context.Context, socialData *dto.Soc
 			Name: socialData.Name,
 		}
 		if err := tx.Create(user).Error; err != nil {
-			return fmt.Errorf("create user: %w", err)
+			return fmt.Errorf("SignInWithSocial: create user: %w", err)
 		}
 
 		// Создаем привязку к соцсети
@@ -161,17 +176,15 @@ func (as *AuthService) SignInWithSocial(ctx context.Context, socialData *dto.Soc
 			ProviderData:   socialData.ProviderData,
 		}
 		if err := tx.Create(socialAuth).Error; err != nil {
-			return fmt.Errorf("create social auth: %w", err)
+			return fmt.Errorf("SignInWithSocial: create social auth: %w", err)
 		}
-
 		userToken, err = as.generateAndSaveNewUserToken(ctx, tx, user.ID)
 		if err != nil {
-			return fmt.Errorf("generate token: %w", err)
+			return fmt.Errorf("SignInWithSocial: generate token: %w", err)
 		}
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("SignInWithSocial transaction: %w", err)
 	}
