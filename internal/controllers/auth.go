@@ -50,10 +50,43 @@ func (ac *AuthController) SignOutAction(c *fiber.Ctx) error {
 	return nil
 }
 
+func (ac *AuthController) SignInWithSocialAction(c *fiber.Ctx) error {
+	socialAuthDTO := &dto.SocialAuthDTO{}
+
+	if err := c.BodyParser(socialAuthDTO); err != nil {
+		ac.log.Error("Failed to parse social auth request", "error", err)
+		return &fiber.Error{
+			Code:    fiber.StatusBadRequest,
+			Message: "Invalid request body",
+		}
+	}
+
+	if err := ac.vl.Struct(socialAuthDTO); err != nil {
+		errs := err.(validator.ValidationErrors)
+		ac.log.Error("Social auth validation failed", "error", errs)
+		return &fiber.Error{
+			Code:    fiber.StatusBadRequest,
+			Message: errs[0].Translate(ac.ut),
+		}
+	}
+
+	token, err := ac.as.SignInWithSocial(c.Context(), socialAuthDTO)
+	if err != nil {
+		ac.log.Error("Social auth failed", "error", err)
+		return &fiber.Error{
+			Code:    fiber.StatusBadRequest,
+			Message: err.Error(),
+		}
+	}
+
+	return c.JSON(pkg.NewResponseBody(token))
+}
+
 func RegisterAuthController(router fiber.Router, container *pkg.Container) {
 	ctrl := NewAuthController(container)
 	router.Post("/refresh", ctrl.RefreshTokensPairAction)
 	router.Put("/signout", ctrl.SignOutAction)
+	router.Post("/social/signin", ctrl.SignInWithSocialAction)
 }
 
 func NewAuthController(cnt *pkg.Container) *AuthController {

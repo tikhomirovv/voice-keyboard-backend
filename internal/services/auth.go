@@ -124,9 +124,8 @@ func (as *AuthService) generateNewRefreshTokenString() string {
 // SignInWithSocial аутентифицирует пользователя через социальную сеть
 func (as *AuthService) SignInWithSocial(ctx context.Context, socialData *dto.SocialAuthDTO) (*dto.UserTokenDTO, error) {
 	socialAuthsRepo := repositories.NewUserSocialAuthsRepository(as.db)
-	usersRepo := repositories.NewUsersRepository(as.db)
 
-	// Проверяем существующую привязку к соцсети
+	// Проверяем существующую привязку к соцсети по provider + provider_user_id
 	socialAuth, err := socialAuthsRepo.FindByProviderAndID(ctx, socialData.Provider, socialData.ProviderUserID)
 	if err == nil {
 		// Нашли существующую привязку - авторизуем
@@ -137,43 +136,23 @@ func (as *AuthService) SignInWithSocial(ctx context.Context, socialData *dto.Soc
 		return as.generateUserTokensPair(userToken)
 	}
 
-	// Проверяем существование пользователя по email
-	user, err := usersRepo.FindByEmail(ctx, socialData.Email)
-	if err == nil {
-		// Пользователь существует - создаем привязку к соцсети
-		socialAuth = &models.UserSocialAuth{
-			UserID:         user.ID,
-			Provider:       socialData.Provider,
-			ProviderUserID: socialData.ProviderUserID,
-			ProviderEmail:  socialData.Email,
-			ProviderData:   socialData.ProviderData,
-		}
-		if err := socialAuthsRepo.Create(ctx, socialAuth); err != nil {
-			return nil, fmt.Errorf("SignInWithSocial create social auth: %w", err)
-		}
-
-		userToken, err := as.generateAndSaveNewUserToken(ctx, as.db, user.ID)
-		if err != nil {
-			return nil, fmt.Errorf("SignInWithSocial generate token: %w", err)
-		}
-		return as.generateUserTokensPair(userToken)
-	}
-
 	// Создаем нового пользователя и привязку к соцсети
 	var userToken *models.UserToken
 	err = as.db.Transaction(func(tx *gorm.DB) error {
-		user = &models.User{
+		// Создаем нового пользователя только с именем
+		user := &models.User{
 			Name: socialData.Name,
 		}
 		if err := tx.Create(user).Error; err != nil {
 			return fmt.Errorf("create user: %w", err)
 		}
 
+		// Создаем привязку к соцсети
 		socialAuth = &models.UserSocialAuth{
 			UserID:         user.ID,
 			Provider:       socialData.Provider,
 			ProviderUserID: socialData.ProviderUserID,
-			ProviderEmail:  socialData.Email,
+			ProviderEmail:  socialData.Email, // Сохраняем email, но не используем для идентификации
 			ProviderData:   socialData.ProviderData,
 		}
 		if err := tx.Create(socialAuth).Error; err != nil {
@@ -193,6 +172,32 @@ func (as *AuthService) SignInWithSocial(ctx context.Context, socialData *dto.Soc
 	}
 
 	return as.generateUserTokensPair(userToken)
+}
+
+// LinkSocialAccount привязывает дополнительную соц. сеть к существующему аккаунту
+func (as *AuthService) LinkSocialAccount(ctx context.Context, userID uint64, socialData *dto.SocialAuthDTO) error {
+	socialAuthsRepo := repositories.NewUserSocialAuthsRepository(as.db)
+
+	// Проверяем, не привязан ли уже этот аккаунт соц. сети к другому пользователю
+	existing, err := socialAuthsRepo.FindByProviderAndID(ctx, socialData.Provider, socialData.ProviderUserID)
+	if err == nil && existing.UserID != userID {
+		return fmt.Errorf("social account already linked to another user")
+	}
+
+	// Создаем новую привязку
+	socialAuth := &models.UserSocialAuth{
+		UserID:         userID,
+		Provider:       socialData.Provider,
+		ProviderUserID: socialData.ProviderUserID,
+		ProviderEmail:  socialData.Email,
+		ProviderData:   socialData.ProviderData,
+	}
+
+	if err := socialAuthsRepo.Create(ctx, socialAuth); err != nil {
+		return fmt.Errorf("link social account: %w", err)
+	}
+
+	return nil
 }
 
 func NewAuthService(db *gorm.DB, cfg *pkg.Config, log logger.Logger, em *pkg.Emailer) *AuthService {
