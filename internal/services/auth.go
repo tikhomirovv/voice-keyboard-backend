@@ -144,13 +144,13 @@ func (as *AuthService) SignInWithSocial(ctx context.Context, socialData *dto.Soc
 				return fmt.Errorf("failed to update social auth: %w", err)
 			}
 
-			// Обновляем имя пользователя
-			if err := usersRepo.Update(ctx, &models.User{
-				ID:   socialAuth.UserID,
-				Name: socialData.Name,
-			}); err != nil {
-				return fmt.Errorf("failed to update user: %w", err)
-			}
+			// // Обновляем имя пользователя
+			// if err := usersRepo.Update(ctx, &models.User{
+			// 	ID:   socialAuth.UserID,
+			// 	Name: socialData.Name,
+			// }); err != nil {
+			// 	return fmt.Errorf("failed to update user: %w", err)
+			// }
 
 			// Генерируем новый токен для существующего пользователя
 			userToken, err = as.generateAndSaveNewUserToken(ctx, tx, socialAuth.UserID)
