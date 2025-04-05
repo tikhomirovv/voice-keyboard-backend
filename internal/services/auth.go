@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/sha512"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"time"
@@ -74,19 +74,22 @@ func (as *AuthService) generateUserTokensPair(userToken *models.UserToken) (*dto
 			IssuedAt: &jwt.NumericDate{
 				Time: userToken.CreatedAt,
 			},
+			// Добавляем идентификатор токена для возможности отзыва
+			ID: uuid.New().String(),
 		},
 		User: auth.User{
 			ID: userToken.UserId,
 		},
 	}
 
-	// Create token
+	// Create token (jwt.SignedString уже использует правильный base64url)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	secret := as.cfg.Auth.Secret
 	t, err := token.SignedString([]byte(secret))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generateUserTokensPair: %w", err)
 	}
+
 	res := &dto.UserTokenDTO{
 		AccessToken:  t,
 		RefreshToken: userToken.RefreshToken,
@@ -118,11 +121,16 @@ func (as *AuthService) generateNewUserToken(userId uint64) *models.UserToken {
 }
 
 func (as *AuthService) generateNewRefreshTokenString() string {
-	secret := as.cfg.Auth.Secret
-	mac := hmac.New(sha512.New, []byte(secret))
-	mac.Write([]byte(uuid.New().String()))
-	bsm := mac.Sum(nil)
-	return base64.StdEncoding.EncodeToString(bsm)
+	// Генерируем UUID для уникальности токена
+	tokenUUID := uuid.New().String()
+
+	// Создаем HMAC с SHA-256 (более компактный, чем SHA-512, но все равно очень безопасный)
+	mac := hmac.New(sha256.New, []byte(as.cfg.Auth.Secret))
+	mac.Write([]byte(tokenUUID))
+	signedBytes := mac.Sum(nil)
+
+	// Используем RawURLEncoding для совместимости с RFC 7515
+	return base64.RawURLEncoding.EncodeToString(signedBytes)
 }
 
 // SignInWithSocial аутентифицирует пользователя через социальную сеть
