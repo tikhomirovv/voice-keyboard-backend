@@ -1,0 +1,26 @@
+{{template "base" .}} {{define "title"}}Успешная авторизация{{end}} {{define
+"styles"}}{{end}} {{define "content"}}
+<div class="flex items-center justify-center">
+  <div
+    class="max-w-md w-full bg-white rounded-xl shadow-md overflow-hidden p-8 text-center"
+  >
+    <div class="mb-8">
+      <h1 class="text-2xl font-bold text-gray-900 mb-2">
+        Авторизация успешна!
+      </h1>
+      <p class="text-gray-600">Нажмите кнопку ниже, чтобы открыть приложение</p>
+    </div>
+
+    <button onclick="openDesktopApp()" class="btn-primary">
+      Открыть приложение
+    </button>
+  </div>
+</div>
+{{end}} {{define "scripts"}}
+<script>
+  function openDesktopApp() {
+    window.location.href =
+      "{{.AppScheme}}{{.AppPath}}?access_token={{.AccessToken}}&refresh_token={{.RefreshToken}}";
+  }
+</script>
+{{end}}

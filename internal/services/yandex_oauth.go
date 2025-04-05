@@ -24,28 +24,28 @@ type YandexOAuthService struct {
 var _ interfaces.YandexOAuthServiceInterface = (*YandexOAuthService)(nil)
 
 func NewYandexOAuthService(cfg *pkg.Config, log logger.Logger) *YandexOAuthService {
-	redirectURI, err := cfg.BuildSiteUrl(cfg.YandexOAuth.RedirectPath, nil)
+	redirectURI, err := cfg.BuildSiteUrl(cfg.Auth.YandexOAuth.RedirectPath, nil)
 	if err != nil {
 		log.Error("YandexOAuthService.NewYandexOAuthService", "Failed to build redirect URI", "error", err)
 	}
 
 	// Добавим логирование для отладки
 	log.Info("YandexOAuthService.NewYandexOAuthService",
-		"clientID", cfg.YandexOAuth.ClientID,
+		"clientID", cfg.Auth.YandexOAuth.ClientID,
 		"redirectURI", redirectURI,
-		"authURL", cfg.YandexOAuth.AuthURL,
-		"tokenURL", cfg.YandexOAuth.TokenURL,
-		"userInfoURL", cfg.YandexOAuth.UserInfoURL,
+		"authURL", cfg.Auth.YandexOAuth.AuthURL,
+		"tokenURL", cfg.Auth.YandexOAuth.TokenURL,
+		"userInfoURL", cfg.Auth.YandexOAuth.UserInfoURL,
 	)
 
 	return &YandexOAuthService{
 		config: &auth.YandexOAuthConfig{
-			ClientID:     cfg.YandexOAuth.ClientID,
-			ClientSecret: cfg.YandexOAuth.ClientSecret,
+			ClientID:     cfg.Auth.YandexOAuth.ClientID,
+			ClientSecret: cfg.Auth.YandexOAuth.ClientSecret,
 			RedirectURI:  redirectURI,
-			AuthURL:      cfg.YandexOAuth.AuthURL,
-			TokenURL:     cfg.YandexOAuth.TokenURL,
-			UserInfoURL:  cfg.YandexOAuth.UserInfoURL,
+			AuthURL:      cfg.Auth.YandexOAuth.AuthURL,
+			TokenURL:     cfg.Auth.YandexOAuth.TokenURL,
+			UserInfoURL:  cfg.Auth.YandexOAuth.UserInfoURL,
 		},
 		log: log,
 	}

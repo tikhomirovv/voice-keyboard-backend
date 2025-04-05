@@ -6,10 +6,19 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/template/html/v2"
 )
 
 func NewApp(container *Container) *fiber.App {
 	config := container.Config
+
+	// Инициализация движка шаблонов
+	engine := html.New("./internal/views", ".html")
+
+	// Включаем отладку для просмотра ошибок парсинга шаблонов
+	engine.Debug(config.App.Debug)
+	// Включаем перезагрузку шаблонов в режиме разработки
+	engine.Reload(config.App.Debug)
 
 	errHandler := NewAPIErrorHandler(container.Logger)
 	app := fiber.New(fiber.Config{
@@ -18,6 +27,8 @@ func NewApp(container *Container) *fiber.App {
 		// Override default error handler
 		ErrorHandler: errHandler.HandleError,
 		Prefork:      config.App.Prefork,
+		// Подключаем движок шаблонов
+		Views: engine,
 	})
 	app.Use(recover.New())
 	if config.Cors.Enabled {

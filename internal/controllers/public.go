@@ -77,15 +77,22 @@ func (ac *PublicController) YandexCallbackAction(c *fiber.Ctx) error {
 			Message: "Failed to complete authentication",
 		}
 	}
+	// Рендерим страницу с токенами
+	return c.Render("auth_success", fiber.Map{
+		"AccessToken":  userToken.AccessToken,
+		"RefreshToken": userToken.RefreshToken,
+		"AppScheme":    ac.cfg.DesktopApp.Scheme,
+		"AppPath":      ac.cfg.DesktopApp.AuthPath,
+	})
 
-	return c.JSON(pkg.NewResponseBody(userToken))
+	// return c.JSON(pkg.NewResponseBody(userToken))
 }
 
 func RegisterPublicController(router fiber.Router, container *pkg.Container) {
 	ctrl := NewPublicController(container)
 	// yandex auth
 	router.Get("/auth/yandex/login", ctrl.InitiateYandexAuthAction)
-	router.Get("/auth/yandex/callback", ctrl.YandexCallbackAction)
+	router.Get("/auth/yandex/connect", ctrl.YandexCallbackAction)
 }
 
 func NewPublicController(cnt *pkg.Container) *PublicController {
@@ -96,6 +103,7 @@ func NewPublicController(cnt *pkg.Container) *PublicController {
 		log: cnt.Logger,
 		as:  cnt.AuthService,
 		yo:  cnt.YandexOAuthService,
+		cfg: cnt.Config,
 	}
 }
 
@@ -105,4 +113,5 @@ type PublicController struct {
 	log logger.Logger
 	as  interfaces.AuthServiceInterface
 	yo  interfaces.YandexOAuthServiceInterface
+	cfg *pkg.Config
 }

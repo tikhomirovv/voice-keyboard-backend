@@ -12,12 +12,12 @@ import (
 )
 
 type Config struct {
-	App         AppConfig         `mapstructure:"app"`
-	Cors        CorsConfig        `mapstructure:"cors"`
-	Prometheus  PrometheusConfig  `mapstructure:"prometheus"`
-	Database    DatabaseConfig    `mapstructure:"database"`
-	Auth        AuthConfig        `mapstructure:"auth"`
-	YandexOAuth YandexOAuthConfig `mapstructure:"yandex_oauth"`
+	App        AppConfig        `mapstructure:"app"`
+	Cors       CorsConfig       `mapstructure:"cors"`
+	Prometheus PrometheusConfig `mapstructure:"prometheus"`
+	Database   DatabaseConfig   `mapstructure:"database"`
+	Auth       AuthConfig       `mapstructure:"auth"`
+	DesktopApp DesktopAppConfig `mapstructure:"desktop_app"`
 }
 
 type AppConfig struct {
@@ -57,9 +57,10 @@ type DatabaseConfig struct {
 }
 
 type AuthConfig struct {
-	Secret                string `mapstructure:"secret"`
-	TokenTtl              int    `mapstructure:"token_ttl"`
-	ResetPasswordTokenTtl int    `mapstructure:"reset_password_token_ttl"`
+	Secret                string            `mapstructure:"secret"`
+	TokenTtl              int               `mapstructure:"token_ttl"`
+	ResetPasswordTokenTtl int               `mapstructure:"reset_password_token_ttl"`
+	YandexOAuth           YandexOAuthConfig `mapstructure:"yandex"`
 }
 
 type YandexOAuthConfig struct {
@@ -69,6 +70,11 @@ type YandexOAuthConfig struct {
 	AuthURL      string `mapstructure:"auth_url"`
 	TokenURL     string `mapstructure:"token_url"`
 	UserInfoURL  string `mapstructure:"user_info_url"`
+}
+
+type DesktopAppConfig struct {
+	Scheme   string `mapstructure:"scheme"`
+	AuthPath string `mapstructure:"auth_path"`
 }
 
 func (c *Config) GetAppPort() string {
