@@ -55,6 +55,8 @@ var ServiceSet = wire.NewSet(
 	wire.Bind(new(interfaces.YandexOAuthServiceInterface), new(*services.YandexOAuthService)),
 	services.NewAuthService,
 	wire.Bind(new(interfaces.AuthServiceInterface), new(*services.AuthService)),
+	services.NewAudioService,
+	wire.Bind(new(interfaces.AudioServiceInterface), new(*services.AudioService)),
 )
 
 func InitializeContainer(configPath string) (*pkg.Container, error) {

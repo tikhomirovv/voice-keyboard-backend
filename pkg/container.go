@@ -16,4 +16,5 @@ type Container struct {
 	ErrorHandler       *APIErrorHandler
 	AuthService        interfaces.AuthServiceInterface
 	YandexOAuthService interfaces.YandexOAuthServiceInterface
+	AudioService       interfaces.AudioServiceInterface
 }
