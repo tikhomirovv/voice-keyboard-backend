@@ -12,8 +12,8 @@ import (
 	"gitlab.com/voice-keyboard/backend-go/healthcheck"
 	"gitlab.com/voice-keyboard/backend-go/internal/controllers"
 	"gitlab.com/voice-keyboard/backend-go/internal/routers"
+	"gitlab.com/voice-keyboard/backend-go/internal/services/websocket"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
-	"gitlab.com/voice-keyboard/backend-go/pkg/websocket"
 )
 
 func NewApplicationStartCommand() *cli.Command {

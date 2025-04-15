@@ -41,7 +41,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gorilla/websocket"
+	"gitlab.com/voice-keyboard/backend-go/internal/dto"
 	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
@@ -90,6 +92,7 @@ type Session struct {
 	ID                string
 	UserID            string
 	SampleRate        uint32
+	Format            string
 	Conn              *websocket.Conn
 	StartTime         time.Time
 	LastTime          time.Time
@@ -111,6 +114,7 @@ type Server struct {
 	userSessions map[string]map[string]bool // UserID -> map[SessionID]bool
 	sessionMutex sync.RWMutex
 	httpServer   *http.Server
+	vl           *validator.Validate
 }
 
 // NewServer создает новый WebSocket-сервер
@@ -130,6 +134,7 @@ func NewServer(c *pkg.Container) *Server {
 		},
 		sessions:     make(map[string]*Session),
 		userSessions: make(map[string]map[string]bool),
+		vl:           c.Validator,
 	}
 }
 
@@ -222,12 +227,13 @@ func (s *Server) startSubscriptionCheck(session *Session) {
 
 // initSession инициализирует новую WebSocket сессию
 // Возвращает созданную сессию и ошибку, если что-то пошло не так
-func (s *Server) initSession(userID, sessionID string, sampleRate uint32, conn *websocket.Conn) (*Session, error) {
+func (s *Server) initSession(userID, sessionID string, sampleRate uint32, format string, conn *websocket.Conn) (*Session, error) {
 	// Создание новой сессии
 	session := &Session{
 		ID:                sessionID,
 		UserID:            userID,
 		SampleRate:        sampleRate,
+		Format:            format,
 		Conn:              conn,
 		StartTime:         time.Now(),
 		LastTime:          time.Now(),
@@ -276,28 +282,23 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем sessionID из параметра URL
-	sessionID := r.URL.Query().Get("sessionId")
-	if sessionID == "" {
-		http.Error(w, "Session ID required", http.StatusBadRequest)
-		return
+	wsConnectAudioDTO := &dto.WsConnectAudioDTO{}
+	wsConnectAudioDTO.SessionID = r.URL.Query().Get("sessionId")
+	wsConnectAudioDTO.Format = r.URL.Query().Get("format")
+	sampleRateStr := r.URL.Query().Get("sampleRate")
+	if sampleRateStr != "" {
+		sampleRateUint64, err := strconv.ParseUint(sampleRateStr, 10, 32)
+		if err == nil {
+			wsConnectAudioDTO.SampleRate = uint32(sampleRateUint64)
+		}
 	}
 
-	// Получаем sampleRate из параметра URL
-	sampleRate := r.URL.Query().Get("sampleRate")
-	if sampleRate == "" {
-		http.Error(w, "Sample rate required", http.StatusBadRequest)
+	if err := s.vl.Struct(wsConnectAudioDTO); err != nil {
+		errs := err.(validator.ValidationErrors)
+		s.logger.Error("Ws connect audio validation failed", "error", errs)
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	// Преобразуем sampleRate в uint32
-	sampleRateUint32, err := strconv.ParseUint(sampleRate, 10, 32)
-	if err != nil {
-		http.Error(w, "Invalid sample rate", http.StatusBadRequest)
-		return
-	}
-	// Преобразуем sampleRateUint32 в uint32
-	sampleRateUint32Value := uint32(sampleRateUint32)
 
 	// Проверка количества соединений для пользователя
 	if !s.checkUserConnectionLimit(userID) {
@@ -310,7 +311,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 1. Экономить ресурсы на создание WebSocket-соединения
 	// 2. Иметь возможность вернуть клиенту HTTP-статус 409 Conflict
 	s.sessionMutex.RLock()
-	if _, exists := s.sessions[sessionID]; exists {
+	if _, exists := s.sessions[wsConnectAudioDTO.SessionID]; exists {
 		s.sessionMutex.RUnlock()
 		http.Error(w, "Session with this ID already exists", http.StatusConflict)
 		return
@@ -325,7 +326,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Инициализируем сессию
-	session, err := s.initSession(userID, sessionID, sampleRateUint32Value, conn)
+	session, err := s.initSession(userID, wsConnectAudioDTO.SessionID, wsConnectAudioDTO.SampleRate, wsConnectAudioDTO.Format, conn)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("Session initialization failed: %v", err))
 		conn.Close() // Закрываем соединение при ошибке
@@ -448,8 +449,8 @@ func (s *Server) handleAudioMessage(session *Session, message WebSocketMessage) 
 
 	// Создаем структуру с форматом аудио
 	format := &AudioFormat{
-		Format:     "i8",
-		SampleRate: 8000,
+		Format:     session.Format,
+		SampleRate: session.SampleRate,
 	}
 
 	// Получаем процессор для указанного формата
