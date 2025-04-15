@@ -13,6 +13,7 @@ import (
 	"gitlab.com/voice-keyboard/backend-go/internal/controllers"
 	"gitlab.com/voice-keyboard/backend-go/internal/routers"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
+	"gitlab.com/voice-keyboard/backend-go/pkg/websocket"
 )
 
 func NewApplicationStartCommand() *cli.Command {
@@ -49,7 +50,6 @@ func NewApplicationStartCommand() *cli.Command {
 			authRouter := routers.NewAuthRouter(apiV1Router, container)
 			controllers.RegisterAuthController(authRouter, container)
 
-			logger.Info(fmt.Sprintf(`%s instance "%s" started`, config.App.Name, config.App.Instance))
 			// Listen web app
 			go func() {
 				if err := app.Listen(config.GetAppPort()); err != nil {
@@ -57,11 +57,24 @@ func NewApplicationStartCommand() *cli.Command {
 				}
 			}()
 
+			// Создание и запуск WebSocket-сервера
+			wsApp := websocket.NewServer(container)
+			go func() {
+				if err := wsApp.Start(); err != nil {
+					logger.Error(fmt.Sprintf("Failed to start WebSocket server: %v", err))
+				}
+			}()
+
+			logger.Info(fmt.Sprintf(`%s instance "%s" started`, config.App.Name, config.App.Instance))
+
 			c := make(chan os.Signal, 1)                                    // Create channel to signify a signal being sent
 			signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM) // When an interrupt or termination signal is sent, notify the channel
 			<-c                                                             // This blocks the main thread until an interrupt is received
 			logger.Info(fmt.Sprintf(`%s instance "%s" gracefully shutting down...`, config.App.Name, config.App.Instance))
+
 			_ = app.Shutdown()
+			_ = wsApp.Stop()
+
 			logger.Info(fmt.Sprintf(`%s instance "%s" was successful shutdown.`, config.App.Name, config.App.Instance))
 
 			return nil

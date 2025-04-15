@@ -10,6 +10,7 @@ import (
 type AuthServiceInterface interface {
 	SignInWithSocial(ctx context.Context, socialAuthDTO *dto.SocialAuthDTO) (*dto.UserTokenDTO, error)
 	RefreshTokensPair(ctx context.Context, refresh *dto.RefreshTokensPairDTO) (*dto.UserTokenDTO, error)
+	ValidateToken(tokenString string) (uint64, error)
 }
 
 // YandexOAuthServiceInterface определяет методы для работы с Яндекс OAuth

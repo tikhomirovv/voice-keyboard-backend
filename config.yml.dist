@@ -41,3 +41,12 @@ auth:
 desktop_app:
   scheme: voice-keyboard://
   auth_path: auth
+
+websocket:
+  enabled: true
+  port: 8081
+  path: /ws/audio
+  max_connections_per_user: 5
+  max_session_duration: 600 # seconds
+  idle_timeout: 300 # seconds
+  connection_timeout: 30 # seconds

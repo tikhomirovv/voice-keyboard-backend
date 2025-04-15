@@ -231,6 +231,34 @@ func (as *AuthService) LinkSocialAccount(ctx context.Context, userID uint64, soc
 	return nil
 }
 
+// ValidateToken проверяет JWT токен и возвращает ID пользователя
+func (as *AuthService) ValidateToken(tokenString string) (uint64, error) {
+	// Парсинг токена с использованием секрета из конфигурации
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+		// Проверка метода подписи
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(as.cfg.Auth.Secret), nil
+	})
+
+	if err != nil {
+		return 0, fmt.Errorf("token parsing error: %w", err)
+	}
+
+	if !token.Valid {
+		return 0, fmt.Errorf("invalid token")
+	}
+
+	// Используем функцию из пакета auth для извлечения пользователя
+	user, err := auth.ExtractUser(token)
+	if err != nil {
+		return 0, fmt.Errorf("extracting user error: %w", err)
+	}
+
+	return user.ID, nil
+}
+
 func NewAuthService(
 	db *gorm.DB,
 	cfg *pkg.Config,
