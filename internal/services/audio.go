@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -113,17 +114,6 @@ func (s *AudioService) convertToWavFile(rawFilePath string, sampleRate uint32) (
 	}
 	dataSize := fileInfo.Size()
 
-	// Читаем все данные из файла
-	data := make([]byte, dataSize)
-	_, err = rawFile.Read(data)
-	if err != nil {
-		rawFile.Close()
-		return "", fmt.Errorf("failed to read raw data: %w", err)
-	}
-
-	// Закрываем исходный файл после чтения всех данных
-	rawFile.Close()
-
 	// Создаем путь для WAV-файла (заменяем расширение)
 	wavFilePath := filepath.Join(filepath.Dir(rawFilePath),
 		fmt.Sprintf("%s.wav", filepath.Base(rawFilePath[:len(rawFilePath)-4])))
@@ -131,29 +121,34 @@ func (s *AudioService) convertToWavFile(rawFilePath string, sampleRate uint32) (
 	// Создаем WAV-файл
 	wavFile, err := os.Create(wavFilePath)
 	if err != nil {
+		rawFile.Close() // Закрываем исходный файл в случае ошибки
 		return "", fmt.Errorf("failed to create WAV file: %w", err)
 	}
 
 	// Записываем WAV-заголовок
 	if err := s.writeWavHeader(wavFile, uint32(dataSize), sampleRate); err != nil {
+		rawFile.Close()
 		wavFile.Close()
 		return "", fmt.Errorf("failed to write WAV header: %w", err)
 	}
 
-	// Записываем аудиоданные в WAV-файл
-	if _, err := wavFile.Write(data); err != nil {
+	// Копируем сырые аудиоданные из исходного файла в WAV-файл
+	if _, err := io.Copy(wavFile, rawFile); err != nil {
+		rawFile.Close()
 		wavFile.Close()
-		return "", fmt.Errorf("failed to write audio data: %w", err)
+		return "", fmt.Errorf("failed to copy audio data: %w", err)
 	}
 
 	// Синхронизируем данные на диск перед закрытием
 	if err := wavFile.Sync(); err != nil {
+		rawFile.Close()
 		wavFile.Close()
 		return "", fmt.Errorf("error syncing WAV file: %w", err)
 	}
 
 	// Закрываем файлы явно, чтобы убедиться, что все операции завершены,
 	// перед удалением исходного файла
+	rawFile.Close()
 	wavFile.Close()
 
 	// Удаляем временный файл после успешной конвертации
