@@ -2,7 +2,6 @@ package interfaces
 
 import (
 	"context"
-	"os"
 
 	"gitlab.com/voice-keyboard/backend-go/internal/dto"
 )
@@ -21,8 +20,8 @@ type YandexOAuthServiceInterface interface {
 }
 
 type AudioServiceInterface interface {
-	CreateAudioFile(userID, sessionID string) (string, *os.File, error)
-	WriteAudioData(file *os.File, data []byte) error
-	CloseAudioFile(file *os.File, sampleRate uint32) (string, error)
-	RemoveAudioFile(filePath string) error
+	Create(userID uint64, sessionID string, sampleRate uint32) (string, error)
+	WriteData(sessionID string, data []byte) error
+	Close(sessionID string) (string, error)
+	Remove(userID uint64, sessionID string) error
 }
