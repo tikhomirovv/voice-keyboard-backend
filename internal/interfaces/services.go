@@ -24,4 +24,5 @@ type AudioServiceInterface interface {
 	WriteData(sessionID string, data []byte) error
 	Close(sessionID string) (string, error)
 	Remove(userID uint64, sessionID string) error
+	GetAudioFilePath(userID uint64, sessionID string, isTemp bool) string
 }

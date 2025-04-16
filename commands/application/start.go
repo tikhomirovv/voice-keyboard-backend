@@ -50,6 +50,10 @@ func NewApplicationStartCommand() *cli.Command {
 			authRouter := routers.NewAuthRouter(apiV1Router, container)
 			controllers.RegisterAuthController(authRouter, container)
 
+			// Регистрация аудио-роутера и контроллера
+			audioRouter := routers.NewAudioRouter(apiV1Router, container)
+			controllers.RegisterAudioController(audioRouter, container)
+
 			// Listen web app
 			go func() {
 				if err := app.Listen(config.GetAppPort()); err != nil {
