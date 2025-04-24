@@ -17,4 +17,5 @@ type Container struct {
 	AuthService        interfaces.AuthServiceInterface
 	YandexOAuthService interfaces.YandexOAuthServiceInterface
 	AudioService       interfaces.AudioServiceInterface
+	TranscriberService interfaces.TranscriberServiceInterface
 }

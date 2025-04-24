@@ -26,3 +26,9 @@ type AudioServiceInterface interface {
 	Remove(userID uint64, sessionID string) error
 	GetAudioFilePath(userID uint64, sessionID string, isTemp bool) string
 }
+
+// TranscriberServiceInterface определяет методы для транскрибации аудио в текст
+type TranscriberServiceInterface interface {
+	// Transcribe выполняет транскрибацию аудио в текст
+	Transcribe(ctx context.Context, request *dto.TranscriberRequest) (*dto.TranscriberResult, error)
+}

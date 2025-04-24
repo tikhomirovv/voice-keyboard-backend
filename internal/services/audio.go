@@ -14,8 +14,8 @@ import (
 const (
 	// Стандартные параметры аудио для речи
 	// WAV_SAMPLE_RATE     uint32 = 16000 // 16 кГц - обычно используется для речи
-	WAV_CHANNELS        uint16 = 1 // моно
-	WAV_BITS_PER_SAMPLE uint16 = 8 // 16 бит
+	WAV_CHANNELS        uint16 = 1  // моно
+	WAV_BITS_PER_SAMPLE uint16 = 16 // 16 бит
 )
 
 // audioSession представляет внутреннюю структуру для хранения информации об аудиофайле
@@ -154,8 +154,9 @@ func (s *audioSession) convertToWavFile(rawFilePath string) (string, error) {
 
 // writeWavHeader записывает заголовок WAV-файла используя константные параметры формата
 func (s *audioSession) writeWavHeader(file *os.File, dataSize uint32) error {
+	sampleRate := s.sampleRate
 	// Вычисляем ByteRate и BlockAlign
-	byteRate := s.sampleRate * uint32(WAV_CHANNELS) * uint32(WAV_BITS_PER_SAMPLE) / 8
+	byteRate := sampleRate * uint32(WAV_CHANNELS) * uint32(WAV_BITS_PER_SAMPLE) / 8
 	blockAlign := WAV_CHANNELS * WAV_BITS_PER_SAMPLE / 8
 
 	// Вычисляем размер всего файла (размер данных + размер заголовка - 8)
@@ -174,7 +175,7 @@ func (s *audioSession) writeWavHeader(file *os.File, dataSize uint32) error {
 	binary.LittleEndian.PutUint32(header[16:20], 16) // размер fmt секции (16 байт)
 	binary.LittleEndian.PutUint16(header[20:22], 1)  // формат аудио (1 = PCM)
 	binary.LittleEndian.PutUint16(header[22:24], WAV_CHANNELS)
-	binary.LittleEndian.PutUint32(header[24:28], s.sampleRate)
+	binary.LittleEndian.PutUint32(header[24:28], sampleRate)
 	binary.LittleEndian.PutUint32(header[28:32], byteRate)
 	binary.LittleEndian.PutUint16(header[32:34], blockAlign)
 	binary.LittleEndian.PutUint16(header[34:36], WAV_BITS_PER_SAMPLE)

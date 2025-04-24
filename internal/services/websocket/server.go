@@ -109,25 +109,27 @@ type Session struct {
 
 // Server представляет WebSocket-сервер для аудиостриминга
 type Server struct {
-	config       *pkg.Config
-	logger       logger.Logger
-	authService  interfaces.AuthServiceInterface
-	audioService interfaces.AudioServiceInterface // Сервис для работы с аудиоданными
-	upgrader     websocket.Upgrader
-	sessions     map[string]*Session
-	userSessions map[uint64]map[string]bool // UserID -> map[SessionID]bool
-	sessionMutex sync.RWMutex
-	httpServer   *http.Server
-	vl           *validator.Validate
+	config             *pkg.Config
+	logger             logger.Logger
+	authService        interfaces.AuthServiceInterface
+	audioService       interfaces.AudioServiceInterface // Сервис для работы с аудиоданными
+	transcriberService interfaces.TranscriberServiceInterface
+	upgrader           websocket.Upgrader
+	sessions           map[string]*Session
+	userSessions       map[uint64]map[string]bool // UserID -> map[SessionID]bool
+	sessionMutex       sync.RWMutex
+	httpServer         *http.Server
+	vl                 *validator.Validate
 }
 
 // NewServer создает новый WebSocket-сервер
 func NewServer(c *pkg.Container) *Server {
 	return &Server{
-		config:       c.Config,
-		logger:       c.Logger,
-		authService:  c.AuthService,
-		audioService: c.AudioService,
+		config:             c.Config,
+		logger:             c.Logger,
+		authService:        c.AuthService,
+		audioService:       c.AudioService,
+		transcriberService: c.TranscriberService,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -535,7 +537,7 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 	// Проверяем, была ли начата сессия
 	if !session.Started {
 		session.mutex.Unlock()
-		s.logger.Warn(fmt.Sprintf("Attempt to stop not started session: %s for user: %s", session.ID, session.UserID))
+		s.logger.Warn(fmt.Sprintf("Attempt to stop not started session: %s for user: %d", session.ID, session.UserID))
 		s.sendError(session, "SESSION_ERROR", "Session not started")
 		// Закрываем соединение после ошибки
 		go s.closeSession(session)
@@ -543,17 +545,17 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 	}
 
 	// Закрываем файл и сохраняем путь для дальнейшей обработки
-	audioFilePath := session.AudioFilePath
-	if session.AudioFile != nil {
-		// Синхронизируем данные с диском и закрываем файл через audioService
-		if _, err := s.audioService.Close(session.ID); err != nil {
-			s.logger.Error(fmt.Sprintf("Error closing audio file: %v", err))
-		}
-		session.AudioFile = nil
+	// audioFilePath := session.AudioFilePath
+	// if session.AudioFile != nil {
+	// Синхронизируем данные с диском и закрываем файл через audioService
+	if _, err := s.audioService.Close(session.ID); err != nil {
+		s.logger.Error(fmt.Sprintf("Error closing audio file: %v", err))
 	}
+	// session.AudioFile = nil
+	// }
 
 	session.Started = false // Сбрасываем флаг начала сессии
-	duration := time.Since(session.StartTime)
+	// duration := time.Since(session.StartTime)
 
 	// Разблокируем мьютекс, чтобы не блокировать другие операции во время ожидания
 	session.mutex.Unlock()
@@ -565,10 +567,10 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 		return
 	}
 
-	s.logger.Info(fmt.Sprintf("Stop recording session: %s for user: %s", session.ID, session.UserID))
+	s.logger.Info(fmt.Sprintf("Stop recording session: %s for user: %d", session.ID, session.UserID))
 
 	// Обрабатываем собранные аудиоданные из файла
-	result, err := s.processAudioDataFromFile(session.ID, session.UserID, audioFilePath, duration)
+	result, err := s.processAudioDataFromFile(session.ID, session.UserID)
 
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("Error processing audio data: %v", err))
@@ -594,7 +596,7 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 	}
 
 	// Закрываем соединение после отправки результата
-	s.logger.Info(fmt.Sprintf("Closing connection after processing session: %s for user: %s", session.ID, session.UserID))
+	s.logger.Info(fmt.Sprintf("Closing connection after processing session: %s for user: %d", session.ID, session.UserID))
 	go s.closeSession(session)
 }
 
@@ -729,18 +731,19 @@ func (s *Server) checkUserSubscription(userID uint64) (bool, error) {
 // processAudioDataFromFile обрабатывает собранные аудиоданные из файла и возвращает результат распознавания
 func (s *Server) processAudioDataFromFile(
 	sessionID string,
-	userID uint64,
-	filePath string,
-	duration time.Duration) (string, error) {
-	// Обрабатываем аудиоданные из файла
-	// Примечание: удаление файла выполняется в closeSession, а не здесь
+	userID uint64) (string, error) {
 
-	// // Используем audioService для обработки файла с аудиоданными
-	// result, err := s.audioService.ProcessAudioData(sessionID, userID, filePath, duration)
-	// if err != nil {
-	// 	return ResultData{}, fmt.Errorf("error processing audio data: %w", err)
-	// }
+	// return "Пример текста распознавания (из файла)", nil
+	// time.Sleep(4000 * time.Millisecond)
 
-	// Заглушка: возвращаем фиксированный результат
-	return "Пример текста распознавания (из файла)", nil
+	// Используем audioService для обработки файла с аудиоданными
+	result, err := s.transcriberService.Transcribe(context.Background(), &dto.TranscriberRequest{
+		SessionID: sessionID,
+		UserID:    userID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("error processing audio data: %w", err)
+	}
+
+	return result.Text, nil
 }

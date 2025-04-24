@@ -16,8 +16,8 @@ type AudioController struct {
 	audioService interfaces.AudioServiceInterface
 }
 
-// GetAudioFileAction отдает WAV-файл по userID и sessionID
-func (ac *AudioController) GetAudioFileAction(c *fiber.Ctx) error {
+// GetAudioFileWavAction отдает WAV-файл по userID и sessionID
+func (ac *AudioController) GetAudioFileWavAction(c *fiber.Ctx) error {
 	// Получаем параметры из URL
 	userIDStr := c.Params("userID")
 	sessionID := c.Params("sessionID")
@@ -53,7 +53,7 @@ func (ac *AudioController) GetAudioFileAction(c *fiber.Ctx) error {
 // RegisterAudioController регистрирует маршруты для AudioController
 func RegisterAudioController(router fiber.Router, container *pkg.Container) {
 	ctrl := NewAudioController(container)
-	router.Get("/:userID/:sessionID", ctrl.GetAudioFileAction)
+	router.Get("/:userID/:sessionID.wav", ctrl.GetAudioFileWavAction)
 }
 
 // NewAudioController создает новый экземпляр AudioController
