@@ -4,6 +4,7 @@ app:
   port: 8080
   debug: true
   prefork: false # multi-process mode
+  env: local
 
 cors:
   enabled: true
@@ -55,3 +56,6 @@ websocket:
 connecte:
   base_url: https://connecte.ai/api/v1
   token: some-token-if-using-connecte
+
+openai:
+  api_key: openai-key

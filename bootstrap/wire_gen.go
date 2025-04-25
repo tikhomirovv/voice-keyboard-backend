@@ -11,7 +11,7 @@ import (
 	"github.com/google/wire"
 	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
 	"gitlab.com/voice-keyboard/backend-go/internal/services"
-	"gitlab.com/voice-keyboard/backend-go/internal/services/transcriber"
+	"gitlab.com/voice-keyboard/backend-go/internal/services/openai"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 	"gorm.io/gorm"
@@ -84,18 +84,18 @@ func InitializeContainer(configPath string) (*pkg.Container, error) {
 	yandexOAuthService := services.NewYandexOAuthService(config, loggerLogger)
 	authService := services.NewAuthService(db, config, loggerLogger, emailer, yandexOAuthService)
 	audioService := services.NewAudioService(loggerLogger)
-	connecteAIService := transcriber.NewConnecteAIService(config)
+	realtimeTranscriberService := openai.NewRealtimeTranscriberService(config, loggerLogger, audioService)
 	container := &pkg.Container{
-		Config:             config,
-		Logger:             loggerLogger,
-		DB:                 db,
-		Emailer:            emailer,
-		Validator:          validate,
-		ErrorHandler:       apiErrorHandler,
-		AuthService:        authService,
-		YandexOAuthService: yandexOAuthService,
-		AudioService:       audioService,
-		TranscriberService: connecteAIService,
+		Config:                     config,
+		Logger:                     loggerLogger,
+		DB:                         db,
+		Emailer:                    emailer,
+		Validator:                  validate,
+		ErrorHandler:               apiErrorHandler,
+		AuthService:                authService,
+		YandexOAuthService:         yandexOAuthService,
+		AudioService:               audioService,
+		RealtimeTranscriberService: realtimeTranscriberService,
 	}
 	return container, nil
 }
@@ -109,4 +109,4 @@ func ProvideLogLevel(cfg *pkg.Config) logger.LogLevel {
 	return "info"
 }
 
-var ServiceSet = wire.NewSet(services.NewYandexOAuthService, wire.Bind(new(interfaces.YandexOAuthServiceInterface), new(*services.YandexOAuthService)), services.NewAuthService, wire.Bind(new(interfaces.AuthServiceInterface), new(*services.AuthService)), services.NewAudioService, wire.Bind(new(interfaces.AudioServiceInterface), new(*services.AudioService)), transcriber.NewConnecteAIService, wire.Bind(new(interfaces.TranscriberServiceInterface), new(*transcriber.ConnecteAIService)))
+var ServiceSet = wire.NewSet(services.NewYandexOAuthService, wire.Bind(new(interfaces.YandexOAuthServiceInterface), new(*services.YandexOAuthService)), services.NewAuthService, wire.Bind(new(interfaces.AuthServiceInterface), new(*services.AuthService)), services.NewAudioService, wire.Bind(new(interfaces.AudioServiceInterface), new(*services.AudioService)), openai.NewRealtimeTranscriberService, wire.Bind(new(interfaces.RealtimeTranscriberServiceInterface), new(*openai.RealtimeTranscriberService)))

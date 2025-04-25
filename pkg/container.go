@@ -8,14 +8,14 @@ import (
 )
 
 type Container struct {
-	Config             *Config
-	Logger             logger.Logger
-	DB                 *gorm.DB
-	Emailer            *Emailer
-	Validator          *validator.Validate
-	ErrorHandler       *APIErrorHandler
-	AuthService        interfaces.AuthServiceInterface
-	YandexOAuthService interfaces.YandexOAuthServiceInterface
-	AudioService       interfaces.AudioServiceInterface
-	TranscriberService interfaces.TranscriberServiceInterface
+	Config                     *Config
+	Logger                     logger.Logger
+	DB                         *gorm.DB
+	Emailer                    *Emailer
+	Validator                  *validator.Validate
+	ErrorHandler               *APIErrorHandler
+	AuthService                interfaces.AuthServiceInterface
+	YandexOAuthService         interfaces.YandexOAuthServiceInterface
+	AudioService               interfaces.AudioServiceInterface
+	RealtimeTranscriberService interfaces.RealtimeTranscriberServiceInterface
 }

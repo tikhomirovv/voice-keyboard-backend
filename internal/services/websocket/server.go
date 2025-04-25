@@ -113,7 +113,7 @@ type Server struct {
 	logger             logger.Logger
 	authService        interfaces.AuthServiceInterface
 	audioService       interfaces.AudioServiceInterface // Сервис для работы с аудиоданными
-	transcriberService interfaces.TranscriberServiceInterface
+	transcriberService interfaces.RealtimeTranscriberServiceInterface
 	upgrader           websocket.Upgrader
 	sessions           map[string]*Session
 	userSessions       map[uint64]map[string]bool // UserID -> map[SessionID]bool
@@ -129,7 +129,7 @@ func NewServer(c *pkg.Container) *Server {
 		logger:             c.Logger,
 		authService:        c.AuthService,
 		audioService:       c.AudioService,
-		transcriberService: c.TranscriberService,
+		transcriberService: c.RealtimeTranscriberService,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -737,13 +737,14 @@ func (s *Server) processAudioDataFromFile(
 	// time.Sleep(4000 * time.Millisecond)
 
 	// Используем audioService для обработки файла с аудиоданными
-	result, err := s.transcriberService.Transcribe(context.Background(), &dto.TranscriberRequest{
-		SessionID: sessionID,
-		UserID:    userID,
-	})
-	if err != nil {
-		return "", fmt.Errorf("error processing audio data: %w", err)
-	}
+	// // result, err := s.transcriberService.Transcribe(context.Background(), &dto.TranscriberRequest{
+	// // 	SessionID: sessionID,
+	// // 	UserID:    userID,
+	// // })
+	// if err != nil {
+	// 	return "", fmt.Errorf("error processing audio data: %w", err)
+	// }
 
-	return result.Text, nil
+	// return result.Text, nil
+	return "Пример текста распознавания (из файла)", nil
 }

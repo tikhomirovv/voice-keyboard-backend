@@ -20,6 +20,7 @@ type Config struct {
 	DesktopApp DesktopAppConfig `mapstructure:"desktop_app"`
 	WebSocket  WebSocketConfig  `mapstructure:"websocket"`
 	Connecte   ConnecteConfig   `mapstructure:"connecte"`
+	OpenAI     OpenAIConfig     `mapstructure:"openai"`
 }
 
 type AppConfig struct {
@@ -29,6 +30,7 @@ type AppConfig struct {
 	Port     uint   `mapstructure:"port"`
 	Debug    bool   `mapstructure:"debug"`
 	Prefork  bool   `mapstructure:"prefork"`
+	Env      string `mapstructure:"env"`
 }
 
 type CorsConfig struct {
@@ -92,6 +94,10 @@ type WebSocketConfig struct {
 type ConnecteConfig struct {
 	BaseUrl string `mapstructure:"base_url"`
 	Token   string `mapstructure:"token"`
+}
+
+type OpenAIConfig struct {
+	APIKey string `mapstructure:"api_key"`
 }
 
 func (c *Config) GetAppPort() string {

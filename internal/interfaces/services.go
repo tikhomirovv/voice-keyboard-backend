@@ -32,3 +32,27 @@ type TranscriberServiceInterface interface {
 	// Transcribe выполняет транскрибацию аудио в текст
 	Transcribe(ctx context.Context, request *dto.TranscriberRequest) (*dto.TranscriberResult, error)
 }
+
+// RealtimeTranscriberServiceInterface определяет методы для транскрибации аудио в текст в реальном времени
+type RealtimeTranscriberServiceInterface interface {
+	// StartSession начинает новую сессию транскрибации в реальном времени
+	// Возвращает ID сессии и канал для приема результатов
+	StartSession(ctx context.Context, options *dto.RealtimeSessionOptions) (string, <-chan *dto.TranscriberResult, error)
+
+	// AppendAudio добавляет аудиоданные в текущую сессию
+	// Данные должны быть в формате base64
+	AppendAudio(ctx context.Context, sessionID string, audioData []byte) error
+
+	// CompleteSession завершает сессию транскрибации и возвращает финальный результат
+	CompleteSession(ctx context.Context, sessionID string) (*dto.TranscriberResult, error)
+
+	// CancelSession отменяет сессию транскрибации и освобождает ресурсы
+	CancelSession(ctx context.Context, sessionID string) error
+}
+
+// FullTranscriberServiceInterface объединяет возможности обоих интерфейсов транскрибации
+// Полезно для сервисов, которые поддерживают оба режима работы
+type FullTranscriberServiceInterface interface {
+	TranscriberServiceInterface
+	RealtimeTranscriberServiceInterface
+}

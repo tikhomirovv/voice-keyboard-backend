@@ -8,7 +8,7 @@ import (
 	"github.com/google/wire"
 	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
 	"gitlab.com/voice-keyboard/backend-go/internal/services"
-	"gitlab.com/voice-keyboard/backend-go/internal/services/transcriber"
+	"gitlab.com/voice-keyboard/backend-go/internal/services/openai"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 	"gorm.io/gorm"
@@ -58,8 +58,8 @@ var ServiceSet = wire.NewSet(
 	wire.Bind(new(interfaces.AuthServiceInterface), new(*services.AuthService)),
 	services.NewAudioService,
 	wire.Bind(new(interfaces.AudioServiceInterface), new(*services.AudioService)),
-	transcriber.NewConnecteAIService,
-	wire.Bind(new(interfaces.TranscriberServiceInterface), new(*transcriber.ConnecteAIService)),
+	openai.NewRealtimeTranscriberService,
+	wire.Bind(new(interfaces.RealtimeTranscriberServiceInterface), new(*openai.RealtimeTranscriberService)),
 )
 
 func InitializeContainer(configPath string) (*pkg.Container, error) {
