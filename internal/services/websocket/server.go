@@ -114,28 +114,30 @@ type Session struct {
 
 // Server представляет WebSocket-сервер для аудиостриминга
 type Server struct {
-	config             *pkg.Config
-	logger             logger.Logger
-	authService        interfaces.AuthServiceInterface
-	audioService       interfaces.AudioServiceInterface // Сервис для работы с аудиоданными
-	transcriberService interfaces.RealtimeTranscriberServiceInterface
-	upgrader           websocket.Upgrader
-	sessions           map[string]*Session
-	userSessions       map[uint64]map[string]bool // UserID -> map[SessionID]bool
-	sessionMutex       sync.RWMutex
-	httpServer         *http.Server
-	vl                 *validator.Validate
-	useRealtimeMode    bool // Флаг использования режима реального времени
+	config                *pkg.Config
+	logger                logger.Logger
+	authService           interfaces.AuthServiceInterface
+	audioService          interfaces.AudioServiceInterface // Сервис для работы с аудиоданными
+	transcriberService    interfaces.RealtimeTranscriberServiceInterface
+	textGenerationService interfaces.LLMTextGenerationServiceInterface
+	upgrader              websocket.Upgrader
+	sessions              map[string]*Session
+	userSessions          map[uint64]map[string]bool // UserID -> map[SessionID]bool
+	sessionMutex          sync.RWMutex
+	httpServer            *http.Server
+	vl                    *validator.Validate
+	useRealtimeMode       bool // Флаг использования режима реального времени
 }
 
 // NewServer создает новый WebSocket-сервер
 func NewServer(c *pkg.Container) *Server {
 	return &Server{
-		config:             c.Config,
-		logger:             c.Logger,
-		authService:        c.AuthService,
-		audioService:       c.AudioService,
-		transcriberService: c.RealtimeTranscriberService,
+		config:                c.Config,
+		logger:                c.Logger,
+		authService:           c.AuthService,
+		audioService:          c.AudioService,
+		transcriberService:    c.RealtimeTranscriberService,
+		textGenerationService: c.OpenAITextGenerationService,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -618,6 +620,11 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 		}
 	}
 
+	result, err = s.fixTextByLLM(context.Background(), result)
+	if err != nil {
+		s.logger.Error(fmt.Sprintf("Error fixing text: %v", err))
+	}
+
 	// Отправляем результат обработки клиенту
 	completedData := CompletedData{
 		Text: result,
@@ -636,6 +643,10 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 	// Закрываем соединение после отправки результата
 	s.logger.Info(fmt.Sprintf("Closing connection after processing session: %s for user: %d", session.ID, session.UserID))
 	go s.closeSession(session)
+}
+
+func (s *Server) fixTextByLLM(ctx context.Context, text string) (string, error) {
+	return s.textGenerationService.FixText(ctx, text)
 }
 
 // sendError отправляет сообщение об ошибке клиенту
