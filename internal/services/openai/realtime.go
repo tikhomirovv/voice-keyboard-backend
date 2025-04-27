@@ -21,11 +21,12 @@ const (
 	realtimeAPIURL = "wss://api.openai.com/v1/realtime"
 
 	// Типы событий от сервера к клиенту
-	eventTypeTranscriptionDelta          = "conversation.item.input_audio_transcription.delta"
-	eventTypeTranscriptionCompleted      = "conversation.item.input_audio_transcription.completed"
-	eventTypeInputAudioBufferCommitted   = "conversation.item.input_audio_buffer.committed"
-	eventTypeTranscriptionSessionCreated = "transcription_session.created"
-	eventTypeError                       = "error"
+	eventTypeTranscriptionDelta            = "conversation.item.input_audio_transcription.delta"
+	eventTypeTranscriptionCompleted        = "conversation.item.input_audio_transcription.completed"
+	eventTypeInputAudioBufferCommitted     = "conversation.item.input_audio_buffer.committed"
+	eventTypeTranscriptionSessionCreated   = "transcription_session.created"
+	eventTypeInputAudioBufferSpeechStarted = "input_audio_buffer.speech_started"
+	eventTypeError                         = "error"
 
 	// Типы событий от клиента к серверу
 	eventTypeInputAudioBufferAppend = "input_audio_buffer.append"
@@ -59,6 +60,7 @@ type RealtimeSession struct {
 	itemID    string          // Текущий ID элемента в разговоре
 	lastText  string          // Последний полученный текст
 	ready     bool            // Флаг готовности сессии
+	isSpeech  bool            // Флаг, указывающий, идет ли речь
 
 	// Поля для отслеживания завершения транскрипции
 	pendingCompletionCh  chan struct{} // Канал для сигнала о завершении после запроса
@@ -121,10 +123,11 @@ type InputAudioTranscription struct {
 
 // TurnDetection описывает настройки обнаружения речи
 type TurnDetection struct {
-	Type              string  `json:"type"`
-	Threshold         float64 `json:"threshold"`
-	PrefixPaddingMS   int     `json:"prefix_padding_ms"`
-	SilenceDurationMS int     `json:"silence_duration_ms"`
+	Type string `json:"type"`
+	// Threshold         float64 `json:"threshold"`
+	// PrefixPaddingMS   int     `json:"prefix_padding_ms"`
+	// SilenceDurationMS int     `json:"silence_duration_ms"`
+	Eagerness string `json:"eagerness"` // (semantic_vad) "low" | "medium" | "high" | "auto", // optional
 }
 
 // NoiseReduction описывает настройки шумоподавления
@@ -251,10 +254,12 @@ func (s *RealtimeSession) initTranscriptionSession() error {
 				Language: s.Language,               // Используем язык из параметров сессии
 			},
 			TurnDetection: &TurnDetection{
-				Type:              "server_vad",
-				Threshold:         0.5,
-				PrefixPaddingMS:   300,
-				SilenceDurationMS: 500,
+				// Type:              "server_vad",
+				Type:      "semantic_vad",
+				Eagerness: "low",
+				// Threshold:         0.5,
+				// PrefixPaddingMS:   300,
+				// SilenceDurationMS: 500,
 			},
 			InputAudioNoiseReduction: &NoiseReduction{
 				Type: "near_field", // Шумоподавление для близкого источника
@@ -307,6 +312,8 @@ func (s *RealtimeSession) handleMessages() {
 				s.handleTranscriptionCompleted(&event)
 			case eventTypeInputAudioBufferCommitted:
 				s.handleAudioBufferCommitted(&event)
+			case eventTypeInputAudioBufferSpeechStarted:
+				s.handleAudioBufferSpeechStarted(&event)
 			case eventTypeError:
 				s.logger.Error(fmt.Sprintf("Session %s: Received error from Realtime API: %+v", s.ID, event.Error))
 			case eventTypeTranscriptionSessionCreated:
@@ -328,6 +335,11 @@ func (s *RealtimeSession) handleTranscriptionDelta(event *RealtimeEvent) {
 	// Обновляем последний текст
 	// s.lastText += event.Delta
 	s.logger.Debug(fmt.Sprintf("Session %s: Delta transcript: %s", s.ID, event.Delta))
+}
+
+func (s *RealtimeSession) handleAudioBufferSpeechStarted(_ *RealtimeEvent) {
+	s.logger.Debug(fmt.Sprintf("Session %s: Audio buffer speech started", s.ID))
+	s.isSpeech = true
 }
 
 // handleTranscriptionCompleted обрабатывает завершенные результаты транскрипции
@@ -531,9 +543,11 @@ func (s *RealtimeTranscriberService) AppendAudio(ctx context.Context, sessionID 
 
 // SetWaitingForCompletion устанавливает флаг ожидания завершения
 func (s *RealtimeSession) SetWaitingForCompletion() {
-	s.completionMutex.Lock()
-	defer s.completionMutex.Unlock()
-	s.waitingForCompletion = true
+	if s.isSpeech {
+		s.completionMutex.Lock()
+		defer s.completionMutex.Unlock()
+		s.waitingForCompletion = true
+	}
 }
 
 // WaitForNextCompletion ожидает следующего события завершения транскрипции
