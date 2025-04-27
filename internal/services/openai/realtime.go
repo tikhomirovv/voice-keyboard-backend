@@ -2,7 +2,6 @@ package openai
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,10 +21,11 @@ const (
 	realtimeAPIURL = "wss://api.openai.com/v1/realtime"
 
 	// Типы событий от сервера к клиенту
-	eventTypeTranscriptionDelta        = "conversation.item.input_audio_transcription.delta"
-	eventTypeTranscriptionCompleted    = "conversation.item.input_audio_transcription.completed"
-	eventTypeInputAudioBufferCommitted = "conversation.item.input_audio_buffer.committed"
-	eventTypeError                     = "error"
+	eventTypeTranscriptionDelta          = "conversation.item.input_audio_transcription.delta"
+	eventTypeTranscriptionCompleted      = "conversation.item.input_audio_transcription.completed"
+	eventTypeInputAudioBufferCommitted   = "conversation.item.input_audio_buffer.committed"
+	eventTypeTranscriptionSessionCreated = "transcription_session.created"
+	eventTypeError                       = "error"
 
 	// Типы событий от клиента к серверу
 	eventTypeInputAudioBufferAppend = "input_audio_buffer.append"
@@ -82,13 +82,17 @@ type RealtimeError struct {
 // AudioBufferAppendEvent описывает событие для отправки аудиоданных
 type AudioBufferAppendEvent struct {
 	Type     string         `json:"type"`
-	Data     string         `json:"data"`
+	Audio    string         `json:"audio"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // TranscriptionSessionUpdateEvent описывает событие для обновления сессии транскрипции
 type TranscriptionSessionUpdateEvent struct {
-	Type                     string                   `json:"type"`
+	Type    string        `json:"type"`
+	Session SessionObject `json:"session"`
+}
+
+type SessionObject struct {
 	InputAudioFormat         string                   `json:"input_audio_format"`
 	InputAudioTranscription  *InputAudioTranscription `json:"input_audio_transcription"`
 	TurnDetection            *TurnDetection           `json:"turn_detection"`
@@ -222,21 +226,23 @@ func (s *RealtimeSession) Close() error {
 func (s *RealtimeSession) initTranscriptionSession() error {
 	// Настройки сессии транскрипции
 	sessionUpdate := TranscriptionSessionUpdateEvent{
-		Type:             eventTypeTranscriptionSession,
-		InputAudioFormat: s.Format, // Используем формат из параметров сессии
-		InputAudioTranscription: &InputAudioTranscription{
-			Model:    "gpt-4o-mini-transcribe", // Используем модель gpt-4o-mini-transcribe
-			Prompt:   s.Prompt,                 // Используем промпт из параметров сессии
-			Language: s.Language,               // Используем язык из параметров сессии
-		},
-		TurnDetection: &TurnDetection{
-			Type:              "server_vad",
-			Threshold:         0.5,
-			PrefixPaddingMS:   300,
-			SilenceDurationMS: 500,
-		},
-		InputAudioNoiseReduction: &NoiseReduction{
-			Type: "near_field", // Шумоподавление для близкого источника
+		Type: eventTypeTranscriptionSession,
+		Session: SessionObject{
+			InputAudioFormat: s.Format, // Используем формат из параметров сессии
+			InputAudioTranscription: &InputAudioTranscription{
+				Model:    "gpt-4o-mini-transcribe", // Используем модель gpt-4o-mini-transcribe
+				Prompt:   s.Prompt,                 // Используем промпт из параметров сессии
+				Language: s.Language,               // Используем язык из параметров сессии
+			},
+			TurnDetection: &TurnDetection{
+				Type:              "server_vad",
+				Threshold:         0.5,
+				PrefixPaddingMS:   300,
+				SilenceDurationMS: 500,
+			},
+			InputAudioNoiseReduction: &NoiseReduction{
+				Type: "near_field", // Шумоподавление для близкого источника
+			},
 		},
 	}
 
@@ -258,7 +264,15 @@ func (s *RealtimeSession) handleMessages() {
 			// Читаем сообщение
 			_, message, err := s.conn.ReadMessage()
 			if err != nil {
-				s.logger.Error(fmt.Sprintf("Session %s: Error reading from Realtime API: %v", s.ID, err))
+				// Проверяем, не закрыт ли канал (что означает нормальное завершение сессии)
+				select {
+				case <-s.closeCh:
+					// Канал закрыт, это нормальное завершение работы
+					s.logger.Info(fmt.Sprintf("Session %s: Connection closed normally", s.ID))
+				default:
+					// Канал не закрыт, это реальная ошибка чтения
+					s.logger.Error(fmt.Sprintf("Session %s: Error reading from Realtime API: %v", s.ID, err))
+				}
 				return
 			}
 
@@ -279,6 +293,13 @@ func (s *RealtimeSession) handleMessages() {
 				s.handleAudioBufferCommitted(&event)
 			case eventTypeError:
 				s.logger.Error(fmt.Sprintf("Session %s: Received error from Realtime API: %+v", s.ID, event.Error))
+			case eventTypeTranscriptionSessionCreated:
+				// Добавляем обработку события создания сессии транскрипции
+				s.logger.Info(fmt.Sprintf("Session %s: Transcription session successfully created", s.ID))
+				if len(event.Metadata) > 0 {
+					metadataJSON, _ := json.Marshal(event.Metadata)
+					s.logger.Debug(fmt.Sprintf("Session %s: Session creation metadata: %s", s.ID, string(metadataJSON)))
+				}
 			default:
 				s.logger.Debug(fmt.Sprintf("Session %s: Received unhandled event type: %s", s.ID, event.Type))
 			}
@@ -318,7 +339,7 @@ func (s *RealtimeSession) handleAudioBufferCommitted(event *RealtimeEvent) {
 }
 
 // sendAudioData отправляет аудиоданные для сессии
-func (s *RealtimeSession) sendAudioData(audioData []byte) error {
+func (s *RealtimeSession) sendAudioData(audioData string) error {
 	// Проверяем активность сессии
 	if s.closed {
 		return fmt.Errorf("session is closed")
@@ -329,13 +350,8 @@ func (s *RealtimeSession) sendAudioData(audioData []byte) error {
 
 	// Отправляем аудиоданные
 	event := AudioBufferAppendEvent{
-		Type: eventTypeInputAudioBufferAppend,
-		Data: base64.StdEncoding.EncodeToString(audioData),
-		Metadata: map[string]any{
-			"session_id": s.ID,
-			"user_id":    s.UserID,
-			"env":        s.config.App.Env,
-		},
+		Type:  eventTypeInputAudioBufferAppend,
+		Audio: audioData,
 	}
 
 	if err := s.sendJSON(event); err != nil {
@@ -399,7 +415,7 @@ func (s *RealtimeTranscriberService) cleanSessions() {
 			s.logger.Info(fmt.Sprintf("Cleaning inactive session %s due to inactivity timeout (%v)", id, sessionInactivityTimeout))
 			// Используем контекст с таймаутом для закрытия
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = s.CancelSession(ctx, id)
+			_ = s.CloseSession(ctx, id)
 			cancel()
 		}
 	}
@@ -437,7 +453,7 @@ func (s *RealtimeTranscriberService) StartSession(
 }
 
 // AppendAudio добавляет аудиоданные в текущую сессию
-func (s *RealtimeTranscriberService) AppendAudio(ctx context.Context, sessionID string, audioData []byte) error {
+func (s *RealtimeTranscriberService) AppendAudio(ctx context.Context, sessionID string, audioData string) error {
 	// Находим сессию
 	s.sessionsMutex.RLock()
 	session, exists := s.sessions[sessionID]
@@ -474,7 +490,7 @@ func (s *RealtimeTranscriberService) CompleteSession(ctx context.Context, sessio
 
 	// Ждем немного, чтобы получить все обновления
 	select {
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		// Время ожидания истекло, берем текущий результат
 		finalResult.Text = session.GetLastText()
 	case <-ctx.Done():
@@ -482,13 +498,13 @@ func (s *RealtimeTranscriberService) CompleteSession(ctx context.Context, sessio
 	}
 
 	// Закрываем сессию и очищаем ресурсы
-	s.CancelSession(ctx, sessionID)
+	s.CloseSession(ctx, sessionID)
 
 	return finalResult, nil
 }
 
-// CancelSession отменяет сессию транскрибации и освобождает ресурсы
-func (s *RealtimeTranscriberService) CancelSession(ctx context.Context, sessionID string) error {
+// CloseSession закрывает сессию транскрибации и освобождает ресурсы
+func (s *RealtimeTranscriberService) CloseSession(ctx context.Context, sessionID string) error {
 	s.sessionsMutex.Lock()
 	session, exists := s.sessions[sessionID]
 	if exists {
@@ -526,6 +542,8 @@ func (s *RealtimeTranscriberService) Close() error {
 			s.logger.Warn(fmt.Sprintf("Error closing session %s: %v", session.ID, err))
 		}
 	}
+
+	s.logger.Info("Successfully closed all realtime transcription sessions")
 
 	return nil
 }

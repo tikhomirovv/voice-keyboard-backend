@@ -84,7 +84,7 @@ func InitializeContainer(configPath string) (*pkg.Container, error) {
 	yandexOAuthService := services.NewYandexOAuthService(config, loggerLogger)
 	authService := services.NewAuthService(db, config, loggerLogger, emailer, yandexOAuthService)
 	audioService := services.NewAudioService(loggerLogger)
-	realtimeTranscriberService := openai.NewRealtimeTranscriberService(config, loggerLogger, audioService)
+	realtimeTranscriberService := openai.NewRealtimeTranscriberService(config, loggerLogger)
 	container := &pkg.Container{
 		Config:                     config,
 		Logger:                     loggerLogger,

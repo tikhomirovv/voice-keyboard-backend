@@ -19,3 +19,7 @@ type Container struct {
 	AudioService               interfaces.AudioServiceInterface
 	RealtimeTranscriberService interfaces.RealtimeTranscriberServiceInterface
 }
+
+func (c *Container) Stop() error {
+	return c.RealtimeTranscriberService.Close()
+}

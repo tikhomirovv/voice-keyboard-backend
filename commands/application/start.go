@@ -76,6 +76,7 @@ func NewApplicationStartCommand() *cli.Command {
 			<-c                                                             // This blocks the main thread until an interrupt is received
 			logger.Info(fmt.Sprintf(`%s instance "%s" gracefully shutting down...`, config.App.Name, config.App.Instance))
 
+			_ = container.Stop()
 			_ = app.Shutdown()
 			_ = wsApp.Stop()
 

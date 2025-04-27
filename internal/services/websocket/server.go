@@ -105,6 +105,11 @@ type Session struct {
 	Started           bool      // Флаг, указывающий, была ли сессия начата
 	subscriptionCheck chan bool // Канал для ожидания завершения проверки подписки
 	mutex             sync.Mutex
+
+	// Поля для работы с реалтайм транскрипцией
+	RealtimeResultCh   <-chan *dto.TranscriberResult // Канал для получения результатов транскрипции
+	RealtimeMode       bool                          // Флаг, указывающий на использование реалтайм режима
+	LastTranscriptText string                        // Последний полученный текст транскрипции
 }
 
 // Server представляет WebSocket-сервер для аудиостриминга
@@ -120,6 +125,7 @@ type Server struct {
 	sessionMutex       sync.RWMutex
 	httpServer         *http.Server
 	vl                 *validator.Validate
+	useRealtimeMode    bool // Флаг использования режима реального времени
 }
 
 // NewServer создает новый WebSocket-сервер
@@ -138,9 +144,10 @@ func NewServer(c *pkg.Container) *Server {
 				return true
 			},
 		},
-		sessions:     make(map[string]*Session),
-		userSessions: make(map[uint64]map[string]bool),
-		vl:           c.Validator,
+		sessions:        make(map[string]*Session),
+		userSessions:    make(map[uint64]map[string]bool),
+		vl:              c.Validator,
+		useRealtimeMode: true, // По умолчанию используем режим реального времени
 	}
 }
 
@@ -434,47 +441,12 @@ func (s *Server) handleAudioMessage(session *Session, message WebSocketMessage) 
 		return
 	}
 
-	// Добавляем дополнительное логирование для отладки
-	// s.logger.Debug(fmt.Sprintf("Received audio data, samples size: %d bytes",
-	// len(audioData.Samples)))
-
 	// Проверяем, не пусты ли данные
 	if len(audioData.Samples) == 0 {
 		s.logger.Error("Empty audio data received")
 		s.sendError(session, "DATA_ERROR", "Empty audio data")
 		return
 	}
-
-	// Декодируем данные из Base64
-	rawAudioBytes, err := base64.StdEncoding.DecodeString(audioData.Samples)
-	if err != nil {
-		s.logger.Error(fmt.Sprintf("Error decoding base64 audio data: %v", err))
-		s.sendError(session, "DATA_ERROR", "Error decoding base64 audio data")
-		return
-	}
-
-	// Создаем структуру с форматом аудио
-	format := &AudioFormat{
-		Format:     session.Format,
-		SampleRate: session.SampleRate,
-	}
-
-	// Получаем процессор для указанного формата
-	processor, err := ValidateAndGetProcessor(format)
-	if err != nil {
-		s.logger.Error(fmt.Sprintf("Error with audio format: %v", err))
-		s.sendError(session, "FORMAT_ERROR", err.Error())
-		return
-	}
-	// Обработка аудиоданных с соответствующим процессором
-	processedData, err := processor.Process(rawAudioBytes)
-	if err != nil {
-		s.logger.Error(fmt.Sprintf("Error processing audio: %v", err))
-		s.sendError(session, "PROCESSING_ERROR", "Failed to process audio data")
-		return
-	}
-
-	// s.logger.Debug(fmt.Sprintf("Successfully decoded %d bytes of audio data", len(rawAudioBytes)))
 
 	session.mutex.Lock()
 
@@ -484,25 +456,80 @@ func (s *Server) handleAudioMessage(session *Session, message WebSocketMessage) 
 		session.Started = true
 		session.StartTime = time.Now() // Сбрасываем время начала
 
-		// Создаем файл для сохранения аудиоданных
-		audioFilePath, err := s.audioService.Create(session.UserID, session.ID, session.SampleRate)
-		if err != nil {
-			session.mutex.Unlock()
-			s.logger.Error(fmt.Sprintf("Failed to create audio file: %v", err))
-			s.sendError(session, "INTERNAL_ERROR", "Failed to prepare for recording")
-			return
+		if s.useRealtimeMode {
+			// Запускаем сессию реального времени
+			if err := s.startRealtimeTranscriptionSession(session); err != nil {
+				session.mutex.Unlock()
+				s.logger.Error(fmt.Sprintf("Failed to start realtime transcription: %v", err))
+				s.sendError(session, "TRANSCRIPTION_ERROR", "Failed to start transcription")
+				return
+			}
+		} else {
+			// Режим с сохранением аудио в файл (отключен)
+			audioFilePath, err := s.audioService.Create(session.UserID, session.ID, session.SampleRate)
+			if err != nil {
+				session.mutex.Unlock()
+				s.logger.Error(fmt.Sprintf("Failed to create audio file: %v", err))
+				s.sendError(session, "INTERNAL_ERROR", "Failed to prepare for recording")
+				return
+			}
+			session.AudioFilePath = audioFilePath
 		}
-		session.AudioFilePath = audioFilePath
 	}
 
-	// Записываем данные в файл
-	if err := s.audioService.WriteData(session.ID, processedData); err != nil {
+	// В зависимости от режима обрабатываем аудиоданные
+	if s.useRealtimeMode {
+		// Режим реального времени
+		session.mutex.Unlock() // Разблокируем мьютекс перед долгой операцией отправки
+
+		// Отправляем аудиоданные в реалтайм транскрипцию
+		if err := s.transcriberService.AppendAudio(context.Background(), session.ID, audioData.Samples); err != nil {
+			s.logger.Error(fmt.Sprintf("Error appending audio to realtime session: %v", err))
+			s.sendError(session, "TRANSCRIPTION_ERROR", "Failed to process audio data")
+			return
+		}
+	} else {
+
+		// Декодируем данные из Base64
+		rawAudioBytes, err := base64.StdEncoding.DecodeString(audioData.Samples)
+		if err != nil {
+			s.logger.Error(fmt.Sprintf("Error decoding base64 audio data: %v", err))
+			s.sendError(session, "DATA_ERROR", "Error decoding base64 audio data")
+			return
+		}
+		// Режим с сохранением в файл (отключен)
+		// Создаем структуру с форматом аудио
+		format := &AudioFormat{
+			Format:     session.Format,
+			SampleRate: session.SampleRate,
+		}
+
+		// Получаем процессор для указанного формата
+		processor, err := ValidateAndGetProcessor(format)
+		if err != nil {
+			session.mutex.Unlock()
+			s.logger.Error(fmt.Sprintf("Error with audio format: %v", err))
+			s.sendError(session, "FORMAT_ERROR", err.Error())
+			return
+		}
+		// Обработка аудиоданных с соответствующим процессором
+		processedData, err := processor.Process(rawAudioBytes)
+		if err != nil {
+			session.mutex.Unlock()
+			s.logger.Error(fmt.Sprintf("Error processing audio: %v", err))
+			s.sendError(session, "PROCESSING_ERROR", "Failed to process audio data")
+			return
+		}
+
+		// Записываем данные в файл
+		if err := s.audioService.WriteData(session.ID, processedData); err != nil {
+			session.mutex.Unlock()
+			s.logger.Error(fmt.Sprintf("Error writing to audio file: %v", err))
+			s.sendError(session, "INTERNAL_ERROR", "Failed to save audio data")
+			return
+		}
 		session.mutex.Unlock()
-		s.logger.Error(fmt.Sprintf("Error writing to audio file: %v", err))
-		s.sendError(session, "INTERNAL_ERROR", "Failed to save audio data")
-		return
 	}
-	session.mutex.Unlock()
 }
 
 // waitForSubscriptionResult ожидает результат проверки подписки с таймаутом
@@ -544,22 +571,6 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 		return
 	}
 
-	// Закрываем файл и сохраняем путь для дальнейшей обработки
-	// audioFilePath := session.AudioFilePath
-	// if session.AudioFile != nil {
-	// Синхронизируем данные с диском и закрываем файл через audioService
-	if _, err := s.audioService.Close(session.ID); err != nil {
-		s.logger.Error(fmt.Sprintf("Error closing audio file: %v", err))
-	}
-	// session.AudioFile = nil
-	// }
-
-	session.Started = false // Сбрасываем флаг начала сессии
-	// duration := time.Since(session.StartTime)
-
-	// Разблокируем мьютекс, чтобы не блокировать другие операции во время ожидания
-	session.mutex.Unlock()
-
 	// Проверяем подписку пользователя
 	if !s.waitForSubscriptionResult(session) {
 		// Подписка недействительна или произошел таймаут, закрываем соединение
@@ -569,15 +580,44 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 
 	s.logger.Info(fmt.Sprintf("Stop recording session: %s for user: %d", session.ID, session.UserID))
 
-	// Обрабатываем собранные аудиоданные из файла
-	result, err := s.processAudioDataFromFile(session.ID, session.UserID)
+	// Завершаем сессию в зависимости от режима
+	var result string
+	var err error
 
-	if err != nil {
-		s.logger.Error(fmt.Sprintf("Error processing audio data: %v", err))
-		s.sendError(session, "PROCESSING_ERROR", "Failed to process audio data")
-		// Закрываем соединение после ошибки
-		go s.closeSession(session)
-		return
+	if s.useRealtimeMode && session.RealtimeMode {
+		// Режим реального времени
+		// Сохраняем последний известный текст
+		result = session.LastTranscriptText
+		session.Started = false
+		// Разблокируем мьютекс до вызова CompleteSession, чтобы избежать блокировок
+		session.mutex.Unlock()
+
+		// Завершаем сессию транскрипции
+		if finalResult, err := s.transcriberService.CompleteSession(context.Background(), session.ID); err == nil && finalResult != nil {
+			// Обновляем результат, если он получен успешно
+			result = finalResult.Text
+		} else if err != nil {
+			s.logger.Error(fmt.Sprintf("Error completing realtime session: %v", err))
+		}
+
+	} else {
+		// Режим с сохранением в файл (отключен)
+		if _, err := s.audioService.Close(session.ID); err != nil {
+			s.logger.Error(fmt.Sprintf("Error closing audio file: %v", err))
+		}
+		session.Started = false
+		session.mutex.Unlock()
+
+		// Обрабатываем собранные аудиоданные из файла
+		result, err = s.processAudioDataFromFile(session.ID, session.UserID)
+
+		if err != nil {
+			s.logger.Error(fmt.Sprintf("Error processing audio data: %v", err))
+			s.sendError(session, "PROCESSING_ERROR", "Failed to process audio data")
+			// Закрываем соединение после ошибки
+			go s.closeSession(session)
+			return
+		}
 	}
 
 	// Отправляем результат обработки клиенту
@@ -681,14 +721,22 @@ func (s *Server) closeSession(session *Session) {
 		return
 	}
 
-	if _, err := s.audioService.Close(session.ID); err != nil {
-		s.logger.Warn(fmt.Sprintf("Error closing audio file: %v", err))
+	// Закрываем ресурсы в зависимости от режима
+	if s.useRealtimeMode && session.RealtimeMode {
+		// Закрываем сессию реального времени
+		if session.ID != "" {
+			if err := s.transcriberService.CloseSession(context.Background(), session.ID); err != nil {
+				s.logger.Warn(fmt.Sprintf("Error closing realtime session: %v", err))
+			} else {
+				s.logger.Info(fmt.Sprintf("Successfully closed realtime session: %s", session.ID))
+			}
+		}
+	} else {
+		// Закрываем аудиофайл
+		if _, err := s.audioService.Close(session.ID); err != nil {
+			s.logger.Warn(fmt.Sprintf("Error closing audio file: %v", err))
+		}
 	}
-
-	// Удаляем временный файл, если он существует, через audioService
-	// if err := s.audioService.Remove(session.UserID, session.ID); err != nil {
-	// 	s.logger.Warn(fmt.Sprintf("Failed to delete temporary audio file: %v", err))
-	// }
 
 	// Корректно закрываем WebSocket соединение
 	if session.Conn != nil {
@@ -747,4 +795,69 @@ func (s *Server) processAudioDataFromFile(
 
 	// return result.Text, nil
 	return "Пример текста распознавания (из файла)", nil
+}
+
+// startRealtimeTranscriptionSession запускает сессию транскрипции в реальном времени
+// и настраивает обработку результатов
+func (s *Server) startRealtimeTranscriptionSession(session *Session) error {
+	// Создаем параметры для сессии реалтайм транскрипции
+	options := &dto.RealtimeSessionOptions{
+		SessionID: session.ID,
+		UserID:    session.UserID,
+		Format:    "pcm16",
+		// Можно добавить язык, промпт и другие опции при необходимости
+	}
+
+	// Запускаем сессию транскрипции
+	sessionID, resultCh, err := s.transcriberService.StartSession(context.Background(), options)
+	if err != nil {
+		return fmt.Errorf("failed to start realtime transcription session: %w", err)
+	}
+
+	// Сохраняем информацию о сессии
+	session.RealtimeResultCh = resultCh
+	session.RealtimeMode = true
+
+	// Запускаем горутину для обработки результатов транскрипции
+	go s.handleRealtimeResults(session)
+
+	s.logger.Info(fmt.Sprintf("Started realtime transcription session: %s for user: %d", sessionID, session.UserID))
+
+	return nil
+}
+
+// handleRealtimeResults обрабатывает результаты транскрипции в реальном времени
+// и отправляет их клиенту через WebSocket
+func (s *Server) handleRealtimeResults(session *Session) {
+	if session.RealtimeResultCh == nil {
+		s.logger.Error(fmt.Sprintf("Realtime result channel is nil for session: %s", session.ID))
+		return
+	}
+
+	// Обрабатываем результаты из канала, пока он не закроется
+	for result := range session.RealtimeResultCh {
+		if result == nil {
+			continue
+		}
+
+		// Сохраняем последний текст
+		session.LastTranscriptText = result.Text
+
+		// Отправляем частичный результат клиенту
+		partialData := PartialData{
+			Text: result.Text,
+		}
+		partialDataJSON, _ := json.Marshal(partialData)
+		response := WebSocketMessage{
+			Type:      MessageTypePartial,
+			SessionID: session.ID,
+			Data:      partialDataJSON,
+		}
+
+		if err := s.sendMessage(session, response); err != nil {
+			s.logger.Error(fmt.Sprintf("Error sending partial result: %v", err))
+		}
+	}
+
+	s.logger.Info(fmt.Sprintf("Realtime result channel closed for session: %s", session.ID))
 }

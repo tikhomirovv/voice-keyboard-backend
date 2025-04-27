@@ -41,13 +41,16 @@ type RealtimeTranscriberServiceInterface interface {
 
 	// AppendAudio добавляет аудиоданные в текущую сессию
 	// Данные должны быть в формате base64
-	AppendAudio(ctx context.Context, sessionID string, audioData []byte) error
+	AppendAudio(ctx context.Context, sessionID string, audioData string) error
 
 	// CompleteSession завершает сессию транскрибации и возвращает финальный результат
 	CompleteSession(ctx context.Context, sessionID string) (*dto.TranscriberResult, error)
 
-	// CancelSession отменяет сессию транскрибации и освобождает ресурсы
-	CancelSession(ctx context.Context, sessionID string) error
+	// CloseSession закрывает сессию транскрибации и освобождает ресурсы
+	CloseSession(ctx context.Context, sessionID string) error
+
+	// Close освобождает ресурсы сервиса и закрывает все активные сессии
+	Close() error
 }
 
 // FullTranscriberServiceInterface объединяет возможности обоих интерфейсов транскрибации
