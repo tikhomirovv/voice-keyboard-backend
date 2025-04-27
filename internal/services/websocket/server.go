@@ -578,8 +578,6 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 		return
 	}
 
-	s.logger.Info(fmt.Sprintf("Stop recording session: %s for user: %d", session.ID, session.UserID))
-
 	// Завершаем сессию в зависимости от режима
 	var result string
 	var err error
@@ -724,13 +722,13 @@ func (s *Server) closeSession(session *Session) {
 	// Закрываем ресурсы в зависимости от режима
 	if s.useRealtimeMode && session.RealtimeMode {
 		// Закрываем сессию реального времени
-		if session.ID != "" {
-			if err := s.transcriberService.CloseSession(context.Background(), session.ID); err != nil {
-				s.logger.Warn(fmt.Sprintf("Error closing realtime session: %v", err))
-			} else {
-				s.logger.Info(fmt.Sprintf("Successfully closed realtime session: %s", session.ID))
-			}
-		}
+		// if session.ID != "" {
+		// 	if err := s.transcriberService.CloseSession(context.Background(), session.ID); err != nil {
+		// 		s.logger.Warn(fmt.Sprintf("Error closing realtime session: %v", err))
+		// 	} else {
+		// 		s.logger.Info(fmt.Sprintf("Successfully closed realtime session: %s", session.ID))
+		// 	}
+		// }
 	} else {
 		// Закрываем аудиофайл
 		if _, err := s.audioService.Close(session.ID); err != nil {
@@ -805,6 +803,7 @@ func (s *Server) startRealtimeTranscriptionSession(session *Session) error {
 		SessionID: session.ID,
 		UserID:    session.UserID,
 		Format:    "pcm16",
+		Language:  "ru",
 		// Можно добавить язык, промпт и другие опции при необходимости
 	}
 
