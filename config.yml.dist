@@ -59,3 +59,7 @@ connecte:
 
 openai:
   api_key: openai-key
+
+releases:
+  path: ./releases
+  actual_version: 1.0.0

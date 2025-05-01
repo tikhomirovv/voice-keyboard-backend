@@ -62,6 +62,8 @@ var ServiceSet = wire.NewSet(
 	wire.Bind(new(interfaces.RealtimeTranscriberServiceInterface), new(*openai.RealtimeTranscriberService)),
 	openai.NewOpenAITextGenerationService,
 	wire.Bind(new(interfaces.LLMTextGenerationServiceInterface), new(*openai.OpenAITextGenerationService)),
+	services.NewReleasesService,
+	wire.Bind(new(interfaces.ReleasesServiceInterface), new(*services.ReleasesService)),
 )
 
 func InitializeContainer(configPath string) (*pkg.Container, error) {

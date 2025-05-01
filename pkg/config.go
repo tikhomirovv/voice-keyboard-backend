@@ -21,6 +21,7 @@ type Config struct {
 	WebSocket  WebSocketConfig  `mapstructure:"websocket"`
 	Connecte   ConnecteConfig   `mapstructure:"connecte"`
 	OpenAI     OpenAIConfig     `mapstructure:"openai"`
+	Releases   ReleasesConfig   `mapstructure:"releases"`
 }
 
 type AppConfig struct {
@@ -98,6 +99,12 @@ type ConnecteConfig struct {
 
 type OpenAIConfig struct {
 	APIKey string `mapstructure:"api_key"`
+}
+
+type ReleasesConfig struct {
+	Path            string `mapstructure:"path"`              // Базовый путь для хранения релизов
+	ActualVersion   string `mapstructure:"actual_version"`    // Актуальная версия приложения
+	ReleasesBaseURL string `mapstructure:"releases_base_url"` // Базовый URL для формирования ссылки на релиз
 }
 
 func (c *Config) GetAppPort() string {

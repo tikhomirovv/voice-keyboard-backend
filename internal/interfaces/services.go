@@ -65,3 +65,7 @@ type LLMTextGenerationServiceInterface interface {
 	// FixText исправляет текст на основе LLM
 	FixText(ctx context.Context, text string) (string, error)
 }
+
+type ReleasesServiceInterface interface {
+	GetReleases(ctx context.Context, options *dto.ReleasesOptions) ([]*dto.Release, error)
+}

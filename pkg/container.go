@@ -19,6 +19,7 @@ type Container struct {
 	AudioService                interfaces.AudioServiceInterface
 	RealtimeTranscriberService  interfaces.RealtimeTranscriberServiceInterface
 	OpenAITextGenerationService interfaces.LLMTextGenerationServiceInterface
+	ReleasesService             interfaces.ReleasesServiceInterface
 }
 
 func (c *Container) Stop() error {

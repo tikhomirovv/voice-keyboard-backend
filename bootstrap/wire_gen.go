@@ -86,6 +86,7 @@ func InitializeContainer(configPath string) (*pkg.Container, error) {
 	audioService := services.NewAudioService(loggerLogger)
 	realtimeTranscriberService := openai.NewRealtimeTranscriberService(config, loggerLogger)
 	openAITextGenerationService := openai.NewOpenAITextGenerationService(config, loggerLogger)
+	releasesService := services.NewReleasesService(config, loggerLogger)
 	container := &pkg.Container{
 		Config:                      config,
 		Logger:                      loggerLogger,
@@ -98,6 +99,7 @@ func InitializeContainer(configPath string) (*pkg.Container, error) {
 		AudioService:                audioService,
 		RealtimeTranscriberService:  realtimeTranscriberService,
 		OpenAITextGenerationService: openAITextGenerationService,
+		ReleasesService:             releasesService,
 	}
 	return container, nil
 }
@@ -111,4 +113,4 @@ func ProvideLogLevel(cfg *pkg.Config) logger.LogLevel {
 	return "info"
 }
 
-var ServiceSet = wire.NewSet(services.NewYandexOAuthService, wire.Bind(new(interfaces.YandexOAuthServiceInterface), new(*services.YandexOAuthService)), services.NewAuthService, wire.Bind(new(interfaces.AuthServiceInterface), new(*services.AuthService)), services.NewAudioService, wire.Bind(new(interfaces.AudioServiceInterface), new(*services.AudioService)), openai.NewRealtimeTranscriberService, wire.Bind(new(interfaces.RealtimeTranscriberServiceInterface), new(*openai.RealtimeTranscriberService)), openai.NewOpenAITextGenerationService, wire.Bind(new(interfaces.LLMTextGenerationServiceInterface), new(*openai.OpenAITextGenerationService)))
+var ServiceSet = wire.NewSet(services.NewYandexOAuthService, wire.Bind(new(interfaces.YandexOAuthServiceInterface), new(*services.YandexOAuthService)), services.NewAuthService, wire.Bind(new(interfaces.AuthServiceInterface), new(*services.AuthService)), services.NewAudioService, wire.Bind(new(interfaces.AudioServiceInterface), new(*services.AudioService)), openai.NewRealtimeTranscriberService, wire.Bind(new(interfaces.RealtimeTranscriberServiceInterface), new(*openai.RealtimeTranscriberService)), openai.NewOpenAITextGenerationService, wire.Bind(new(interfaces.LLMTextGenerationServiceInterface), new(*openai.OpenAITextGenerationService)), services.NewReleasesService, wire.Bind(new(interfaces.ReleasesServiceInterface), new(*services.ReleasesService)))

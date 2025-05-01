@@ -235,7 +235,7 @@ func NewAudioService(logger logger.Logger) *AudioService {
 // GetAudioFilePath генерирует путь к файлу по ID сессии
 // Может использоваться как внутренними методами, так и внешними компонентами
 func (s *AudioService) GetAudioFilePath(userID uint64, sessionID string, isTemp bool) string {
-	tempDir := s.GetTempDir(userID)
+	tempDir := s.GetAudioDir(userID)
 	extension := ".wav"
 	if isTemp {
 		extension = ".tmp"
@@ -243,14 +243,15 @@ func (s *AudioService) GetAudioFilePath(userID uint64, sessionID string, isTemp 
 	return filepath.Join(tempDir, fmt.Sprintf("%s%s", sessionID, extension))
 }
 
-func (s *AudioService) GetTempDir(userID uint64) string {
+// GetAudioDir генерирует путь к директории для хранения аудиоданных
+func (s *AudioService) GetAudioDir(userID uint64) string {
 	return filepath.Join(os.TempDir(), "voice-keyboard", fmt.Sprintf("%d", userID))
 }
 
 // Create создает файл для сохранения аудиоданных и регистрирует новую аудиосессию
 func (s *AudioService) Create(userID uint64, sessionID string, sampleRate uint32) (string, error) {
 	// Создаем временную директорию, если её нет
-	tempDir := s.GetTempDir(userID)
+	tempDir := s.GetAudioDir(userID)
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
