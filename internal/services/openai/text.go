@@ -274,6 +274,10 @@ func (s *OpenAITextGenerationService) ExtractTextFromResponse(response *dto.Resp
 
 // FixText исправляет текст на основе LLM
 func (s *OpenAITextGenerationService) FixText(ctx context.Context, text string) (string, error) {
+	if text == "" {
+		return "", nil
+	}
+
 	prompt := fmt.Sprintf("Please correct all spelling, grammar, and punctuation in the following transcribed text. Add spaces, split sentences, and create new paragraphs where appropriate for better readability. Do not add, remove, or change any information. Do not paraphrase or interpret. Only return the corrected, well-formatted text. Text: `%s`", text)
 
 	request := &dto.ResponseRequest{

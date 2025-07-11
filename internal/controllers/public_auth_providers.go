@@ -14,13 +14,14 @@ func (ac *PublicController) InitiateYandexAuthAction(c *fiber.Ctx) error {
 	if state == "" {
 		state = uuid.New().String()
 	}
+	ac.log.Info("InitiateYandexAuthAction: state", "state", state)
 	// Сохраняем state в cookie для последующей проверки
 	cookie := new(fiber.Cookie)
 	cookie.Name = "oauth_state"
 	cookie.Value = state
 	cookie.Expires = time.Now().Add(15 * time.Minute)
 	cookie.HTTPOnly = true
-	cookie.Secure = true // для HTTPS
+	cookie.Secure = false // для HTTPS
 	c.Cookie(cookie)
 
 	// Получаем URL для авторизации
