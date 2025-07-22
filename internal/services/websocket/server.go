@@ -162,6 +162,8 @@ func (s *Server) Start() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(s.config.WebSocket.Path, s.handleWebSocket)
+	mux.HandleFunc("/ws-monitor/data", s.handleMonitorData)
+	mux.HandleFunc("/ws-monitor", s.handleMonitorPage)
 
 	s.httpServer = &http.Server{
 		Addr:    s.config.GetWebSocketPort(),
