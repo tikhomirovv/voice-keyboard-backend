@@ -283,7 +283,7 @@ func (s *OpenAITextGenerationService) FixText(ctx context.Context, text string) 
 	request := &dto.ResponseRequest{
 		Model:       "gpt-4.1-nano",
 		Input:       prompt,
-		Temperature: 1,
+		Temperature: 0.1,
 	}
 
 	response, err := s.GenerateResponse(ctx, request)
