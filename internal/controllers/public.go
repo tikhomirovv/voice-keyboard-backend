@@ -11,6 +11,13 @@ import (
 
 func RegisterPublicController(router fiber.Router, container *pkg.Container) {
 	ctrl := NewPublicController(container)
+
+	router.Get("/", func(c *fiber.Ctx) error {
+		cfg := container.Config
+		appName := cfg.App.Name
+		return c.SendString(appName)
+	})
+
 	// yandex auth
 	router.Get("/auth/yandex/login", ctrl.InitiateYandexAuthAction)
 	router.Get("/auth/yandex/connect", ctrl.YandexCallbackAction)
