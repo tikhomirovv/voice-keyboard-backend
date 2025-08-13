@@ -36,7 +36,7 @@ func (s *Server) handleMonitorData(w http.ResponseWriter, r *http.Request) {
 			UserID:    session.UserID,
 			Started:   session.Started,
 			StartTime: session.StartTime,
-			LastTime:  session.LastTime,
+			LastTime:  session.LastActivityTime,
 		})
 	}
 

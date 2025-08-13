@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"gitlab.com/voice-keyboard/backend-go/internal/dto"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 )
@@ -49,8 +48,8 @@ func NewTextGenerationClient(apiKey string, logger logger.Logger) *TextGeneratio
 // CreateChatCompletion отправляет запрос к Chat Completions API
 func (c *TextGenerationClient) CreateChatCompletion(
 	ctx context.Context,
-	request *dto.TextGenerationRequest,
-) (*dto.TextGenerationResponse, error) {
+	request *TextGenerationRequest,
+) (*TextGenerationResponse, error) {
 	// Подготовка запроса
 	reqBody, err := json.Marshal(request)
 	if err != nil {
@@ -95,7 +94,7 @@ func (c *TextGenerationClient) CreateChatCompletion(
 	}
 
 	// Разбор ответа
-	var response dto.TextGenerationResponse
+	var response TextGenerationResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
@@ -106,8 +105,8 @@ func (c *TextGenerationClient) CreateChatCompletion(
 // CreateResponse отправляет запрос к Responses API
 func (c *TextGenerationClient) CreateResponse(
 	ctx context.Context,
-	request *dto.ResponseRequest,
-) (*dto.ResponseResult, error) {
+	request *ResponseRequest,
+) (*ResponseResult, error) {
 	// Подготовка запроса
 	reqBody, err := json.Marshal(request)
 	if err != nil {
@@ -152,7 +151,7 @@ func (c *TextGenerationClient) CreateResponse(
 	}
 
 	// Разбор ответа
-	var response dto.ResponseResult
+	var response ResponseResult
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
@@ -182,8 +181,8 @@ func NewOpenAITextGenerationService(
 // GenerateText генерирует текст на основе промпта
 func (s *OpenAITextGenerationService) GenerateText(
 	ctx context.Context,
-	request *dto.TextGenerationRequest,
-) (*dto.TextGenerationResponse, error) {
+	request *TextGenerationRequest,
+) (*TextGenerationResponse, error) {
 	if request.Model == "" {
 		request.Model = "gpt-4.1" // Модель по умолчанию
 	}
@@ -208,8 +207,8 @@ func (s *OpenAITextGenerationService) GenerateText(
 // GenerateResponse генерирует текст на основе инструкций и входных данных через Responses API
 func (s *OpenAITextGenerationService) GenerateResponse(
 	ctx context.Context,
-	request *dto.ResponseRequest,
-) (*dto.ResponseResult, error) {
+	request *ResponseRequest,
+) (*ResponseResult, error) {
 	if request.Model == "" {
 		request.Model = "gpt-4.1" // Модель по умолчанию
 	}
@@ -243,7 +242,7 @@ func (s *OpenAITextGenerationService) GenerateResponse(
 
 // ExtractTextFromResponse извлекает текст из ответа Responses API
 // Возвращает пустую строку, если не удается найти текст в ответе
-func (s *OpenAITextGenerationService) ExtractTextFromResponse(response *dto.ResponseResult) string {
+func (s *OpenAITextGenerationService) ExtractTextFromResponse(response *ResponseResult) string {
 	if response == nil {
 		return ""
 	}
@@ -280,7 +279,7 @@ func (s *OpenAITextGenerationService) FixText(ctx context.Context, text string) 
 
 	prompt := fmt.Sprintf("Please correct all spelling, grammar, and punctuation in the following transcribed text. Add spaces, split sentences, and create new paragraphs where appropriate for better readability. Do not add, remove, or change any information. Do not paraphrase or interpret. Only return the corrected, well-formatted text. Text: `%s`", text)
 
-	request := &dto.ResponseRequest{
+	request := &ResponseRequest{
 		Model:       "gpt-4.1-nano",
 		Input:       prompt,
 		Temperature: 0.1,

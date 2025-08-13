@@ -1,42 +1,10 @@
 package websocket
 
-/*
-WebSocket Protocol
-
-Подключение:
-1. Клиент должен подключаться к WebSocket-серверу с двумя обязательными параметрами:
-   - Authorization заголовок HTTP вида "Bearer <jwt-token>"
-   - URL-параметр sessionId, уникальный идентификатор сессии
-
-   Пример URL для подключения:
-   ws://server:port/path?sessionId=abc123
-
-2. После успешного подключения клиент может отправлять сообщения двух типов:
-   - audio: содержит аудиоданные для обработки
-   - stop: сигнализирует о завершении отправки аудиоданных
-
-3. Сервер может отправлять сообщения двух типов:
-   - result: содержит результат обработки аудиоданных
-   - error: содержит информацию об ошибке
-
-Проверка подписки и управление сессией:
-1. При подключении клиента создается сессия и асинхронно запускается проверка подписки
-2. Если проверка подписки выдает ошибку, соединение закрывается немедленно
-3. Результат проверки (успешный/неуспешный) сохраняется в канале сессии
-4. При получении команды "stop" проверяется наличие подписки по результату из канала
-5. Если подписки нет, сессия закрывается без обработки аудио
-6. Закрытие сессии (closeSession) автоматически освобождает все ресурсы, включая файлы
-
-Все сообщения должны соответствовать формату WebSocketMessage.
-*/
-
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -49,107 +17,51 @@ import (
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 )
 
-// MessageType определяет тип сообщения, которое отправляется через WebSocket
-type MessageType string
-
-const (
-	// Типы сообщений от клиента к серверу
-	MessageTypeAudio MessageType = "audio" // Аудиоданные
-	MessageTypeStop  MessageType = "stop"  // Конец сессии
-
-	// Типы сообщений от сервера к клиенту
-	MessageTypePartial   MessageType = "partial"   // Частичный результат транскрипции
-	MessageTypeCompleted MessageType = "completed" // Результат транскрипции
-	MessageTypeError     MessageType = "error"     // Ошибка
-)
-
-// WebSocketMessage представляет структуру сообщения через WebSocket
-type WebSocketMessage struct {
-	Type      MessageType     `json:"type"`
-	SessionID string          `json:"sessionId"`
-	Data      json.RawMessage `json:"data"`
-}
-
-// AudioData содержит аудиоданные в сообщении
-type AudioData struct {
-	Samples string `json:"samples"` // Байты аудиосэмплов в base64
-}
-
-// CompletedData содержит результат распознавания
-type CompletedData struct {
-	Text string `json:"text"`
-}
-
-// PartialData содержит частичное распознанное текстовое сообщение
-type PartialData struct {
-	Text string `json:"text"`
-}
-
-// ErrorData содержит информацию об ошибке
-type ErrorData struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-// Session представляет активную сессию WebSocket
-type Session struct {
-	ID                string
-	UserID            uint64
-	SampleRate        uint32
-	Format            string
-	Conn              *websocket.Conn
-	StartTime         time.Time
-	LastTime          time.Time
-	AudioFilePath     string    // Путь к временному файлу с аудиоданными
-	AudioFile         *os.File  // Дескриптор файла для записи аудиоданных
-	Started           bool      // Флаг, указывающий, была ли сессия начата
-	subscriptionCheck chan bool // Канал для ожидания завершения проверки подписки
-	mutex             sync.Mutex
-
-	// Поля для работы с реалтайм транскрипцией
-	RealtimeResultCh   <-chan *dto.TranscriberResult // Канал для получения результатов транскрипции
-	RealtimeMode       bool                          // Флаг, указывающий на использование реалтайм режима
-	LastTranscriptText string                        // Последний полученный текст транскрипции
-}
-
 // Server представляет WebSocket-сервер для аудиостриминга
 type Server struct {
-	config                *pkg.Config
-	logger                logger.Logger
-	authService           interfaces.AuthServiceInterface
-	audioService          interfaces.AudioServiceInterface // Сервис для работы с аудиоданными
-	transcriberService    interfaces.RealtimeTranscriberServiceInterface
-	textGenerationService interfaces.LLMTextGenerationServiceInterface
-	upgrader              websocket.Upgrader
-	sessions              map[string]*Session
-	userSessions          map[uint64]map[string]bool // UserID -> map[SessionID]bool
-	sessionMutex          sync.RWMutex
-	httpServer            *http.Server
-	vl                    *validator.Validate
-	useRealtimeMode       bool // Флаг использования режима реального времени
+	config *pkg.Config
+	logger logger.Logger
+
+	// websocket
+	upgrader   websocket.Upgrader
+	httpServer *http.Server
+	vl         *validator.Validate
+
+	// sessions
+	sessions     map[string]*WSSession
+	userSessions map[uint64]map[string]bool // UserID -> map[SessionID]bool
+	sessionMutex sync.RWMutex
+
+	// services
+	authService interfaces.AuthServiceInterface
+	processor   interfaces.WebSocketProcessorInterface
 }
 
 // NewServer создает новый WebSocket-сервер
 func NewServer(c *pkg.Container) *Server {
+	// Создаем сервисы для обработки WebSocket сообщений
+	processor := NewRealtimeWebSocketService(
+		c.Logger,
+		c.RealtimeTranscriberService,
+		c.OpenAITextGenerationService,
+	)
+
 	return &Server{
-		config:                c.Config,
-		logger:                c.Logger,
-		authService:           c.AuthService,
-		audioService:          c.AudioService,
-		transcriberService:    c.RealtimeTranscriberService,
-		textGenerationService: c.OpenAITextGenerationService,
+		config: c.Config,
+		logger: c.Logger,
 		upgrader: websocket.Upgrader{
-			ReadBufferSize:  1024,
-			WriteBufferSize: 1024,
+			ReadBufferSize:  WebSocketReadBufferSize,
+			WriteBufferSize: WebSocketWriteBufferSize,
 			CheckOrigin: func(r *http.Request) bool {
 				// Здесь может быть проверка origin
 				return true
 			},
 		},
-		sessions:        make(map[string]*Session),
-		userSessions:    make(map[uint64]map[string]bool),
-		vl:              c.Validator,
-		useRealtimeMode: true, // По умолчанию используем режим реального времени
+		vl:           c.Validator,
+		sessions:     make(map[string]*WSSession),
+		userSessions: make(map[uint64]map[string]bool),
+		authService:  c.AuthService,
+		processor:    processor,
 	}
 }
 
@@ -161,9 +73,9 @@ func (s *Server) Start() error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(s.config.WebSocket.Path, s.handleWebSocket)
 	mux.HandleFunc("/ws-monitor/data", s.handleMonitorData)
 	mux.HandleFunc("/ws-monitor", s.handleMonitorPage)
+	mux.HandleFunc(s.config.WebSocket.Path, s.handleWebSocket)
 
 	s.httpServer = &http.Server{
 		Addr:    s.config.GetWebSocketPort(),
@@ -195,7 +107,7 @@ func (s *Server) Stop() error {
 				s.gracefulCloseConn(session.Conn)
 			}
 		}
-		s.sessions = make(map[string]*Session)
+		s.sessions = make(map[string]*WSSession)
 		s.userSessions = make(map[uint64]map[string]bool)
 		s.sessionMutex.Unlock()
 
@@ -204,82 +116,6 @@ func (s *Server) Stop() error {
 		return s.httpServer.Shutdown(ctx)
 	}
 	return nil
-}
-
-// startSubscriptionCheck запускает асинхронную проверку подписки пользователя
-// и отправляет результат в канал session.subscriptionCheck
-func (s *Server) startSubscriptionCheck(session *Session) {
-	go func() {
-		s.logger.Info(fmt.Sprintf("Checking subscription for user: %d", session.UserID))
-		isValid, err := s.checkUserSubscription(session.UserID)
-
-		if err != nil {
-			s.logger.Error(fmt.Sprintf("Failed to check subscription: %v", err))
-			// При ошибке проверки считаем, что подписки нет
-
-			// Отправляем сообщение об ошибке
-			s.sendError(session, "SUBSCRIPTION_ERROR", "Failed to check subscription")
-
-			// Отправляем результат проверки в канал
-			session.subscriptionCheck <- false
-
-			// Закрываем соединение только при ошибке проверки
-			go s.closeSession(session)
-			return
-		}
-
-		// Отправляем результат проверки в канал
-		session.subscriptionCheck <- isValid
-
-		if !isValid {
-			s.logger.Warn(fmt.Sprintf("User has no valid subscription: %d", session.UserID))
-			s.sendError(session, "SUBSCRIPTION_ERROR", "User has no valid subscription")
-			go s.closeSession(session)
-
-		} else {
-			s.logger.Info(fmt.Sprintf("Valid subscription confirmed for user: %d", session.UserID))
-		}
-	}()
-}
-
-// initSession инициализирует новую WebSocket сессию
-// Возвращает созданную сессию и ошибку, если что-то пошло не так
-func (s *Server) initSession(userID uint64, sessionID string, sampleRate uint32, format string, conn *websocket.Conn) (*Session, error) {
-	// Создание новой сессии
-	session := &Session{
-		ID:                sessionID,
-		UserID:            userID,
-		SampleRate:        sampleRate,
-		Format:            format,
-		Conn:              conn,
-		StartTime:         time.Now(),
-		LastTime:          time.Now(),
-		AudioFilePath:     "",
-		AudioFile:         nil,
-		Started:           false, // Инициализируем флаг сессии как не начатую
-		subscriptionCheck: make(chan bool, 1),
-		mutex:             sync.Mutex{},
-	}
-
-	// Регистрируем сессию в обработчике под блокировкой
-	s.sessionMutex.Lock()
-	defer s.sessionMutex.Unlock()
-
-	// Регистрируем сессию в картах сервера
-	s.sessions[sessionID] = session
-
-	// Добавляем сессию в список сессий пользователя
-	if s.userSessions[session.UserID] == nil {
-		s.userSessions[session.UserID] = make(map[string]bool)
-	}
-	s.userSessions[session.UserID][sessionID] = true
-
-	s.logger.Info(fmt.Sprintf("Session successfully initialized with ID: %s for user: %d", sessionID, userID))
-
-	// Асинхронно проверяем подписку пользователя сразу при создании сессии
-	go s.startSubscriptionCheck(session)
-
-	return session, nil
 }
 
 // handleWebSocket обрабатывает новое WebSocket-соединение
@@ -343,7 +179,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Инициализируем сессию
-	session, err := s.initSession(userID, wsConnectAudioDTO.SessionID, wsConnectAudioDTO.SampleRate, wsConnectAudioDTO.Format, conn)
+	session, err := s.initSession(userID, conn, wsConnectAudioDTO)
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("Session initialization failed: %v", err))
 		conn.Close() // Закрываем соединение при ошибке
@@ -356,8 +192,64 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	go s.handleSession(session)
 }
 
+// checkUserConnectionLimit проверяет, не превышен ли лимит соединений для пользователя
+func (s *Server) checkUserConnectionLimit(userID uint64) bool {
+	s.sessionMutex.RLock()
+	defer s.sessionMutex.RUnlock()
+
+	sessions, exists := s.userSessions[userID]
+	if !exists {
+		return true
+	}
+
+	return len(sessions) < s.config.WebSocket.MaxConnectionsPerUser
+}
+
+// initSession инициализирует новую WebSocket сессию
+// Возвращает созданную сессию и ошибку, если что-то пошло не так
+func (s *Server) initSession(userID uint64, conn *websocket.Conn, wsConnectAudioDTO *dto.WsConnectAudioDTO) (*WSSession, error) {
+	// Создание новой сессии
+	session := &WSSession{
+		ID:                wsConnectAudioDTO.SessionID,
+		UserID:            userID,
+		Conn:              conn,
+		StartTime:         time.Now(),
+		LastActivityTime:  time.Now(),
+		Started:           false, // Инициализируем флаг сессии как не начатую
+		subscriptionOnce:  sync.Once{},
+		subscriptionValid: false, // По умолчанию считаем подписку недействительной
+		Mutex:             sync.Mutex{},
+		AudioOptions: WSSessionAudioOptions{
+			Format:        wsConnectAudioDTO.Format,
+			SampleRate:    wsConnectAudioDTO.SampleRate,
+			AudioFilePath: "",
+			AudioFile:     nil,
+		},
+	}
+
+	// Регистрируем сессию в обработчике под блокировкой
+	s.sessionMutex.Lock()
+	defer s.sessionMutex.Unlock()
+
+	// Регистрируем сессию в картах сервера
+	s.sessions[session.ID] = session
+
+	// Добавляем сессию в список сессий пользователя
+	if s.userSessions[session.UserID] == nil {
+		s.userSessions[session.UserID] = make(map[string]bool)
+	}
+	s.userSessions[session.UserID][session.ID] = true
+
+	// Асинхронно проверяем подписку пользователя сразу при создании сессии
+	s.startCheckSubscription(session)
+
+	s.logger.Info(fmt.Sprintf("Session successfully initialized with ID: %s for user: %d", session.ID, userID))
+
+	return session, nil
+}
+
 // handleSession обрабатывает все сообщения WebSocket в рамках одной сессии
-func (s *Server) handleSession(session *Session) {
+func (s *Server) handleSession(session *WSSession) {
 	defer s.closeSession(session)
 
 	// Устанавливаем начальный таймаут для чтения
@@ -375,7 +267,7 @@ func (s *Server) handleSession(session *Session) {
 		}
 
 		// Обновляем время последней активности и таймауты
-		session.LastTime = time.Now()
+		session.LastActivityTime = time.Now()
 		session.Conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(s.config.WebSocket.IdleTimeout)))
 		session.Conn.SetWriteDeadline(time.Now().Add(time.Second * time.Duration(s.config.WebSocket.IdleTimeout)))
 
@@ -383,14 +275,14 @@ func (s *Server) handleSession(session *Session) {
 		var wsMessage WebSocketMessage
 		if err := json.Unmarshal(message, &wsMessage); err != nil {
 			s.logger.Error(fmt.Sprintf("Error parsing message: %v", err))
-			s.sendError(session, "PARSE_ERROR", "Invalid message format")
+			s.sendError(session, ErrorCodeParseError, ErrorMessageInvalidMessageFormat)
 			continue
 		}
 
 		// Проверяем соответствие ID сессии
 		if wsMessage.SessionID != session.ID {
 			s.logger.Error(fmt.Sprintf("Session ID mismatch: %s != %s", wsMessage.SessionID, session.ID))
-			s.sendError(session, "SESSION_ERROR", "Session ID mismatch")
+			s.sendError(session, ErrorCodeSessionError, ErrorMessageSessionIDMismatch)
 			continue
 		}
 
@@ -404,55 +296,14 @@ func (s *Server) handleSession(session *Session) {
 			return
 		default:
 			s.logger.Warn(fmt.Sprintf("Unknown message type: %s", wsMessage.Type))
-			s.sendError(session, "UNKNOWN_TYPE", "Unknown message type")
+			s.sendError(session, ErrorCodeUnknownType, ErrorMessageUnknownMessageType)
 		}
 	}
 }
 
-// validateToken проверяет JWT-токен и возвращает ID пользователя в виде строки
-func (s *Server) validateToken(tokenString string) (uint64, error) {
-	s.logger.Debug(fmt.Sprintf("Validating token: %s", tokenString))
-	// Используем AuthService для проверки токена
-	userID, err := s.authService.ValidateToken(tokenString)
-	if err != nil {
-		return 0, fmt.Errorf("token validation error: %w", err)
-	}
-
-	// Преобразуем ID пользователя в строку
-	return userID, nil
-}
-
-// checkUserConnectionLimit проверяет, не превышен ли лимит соединений для пользователя
-func (s *Server) checkUserConnectionLimit(userID uint64) bool {
-	s.sessionMutex.RLock()
-	defer s.sessionMutex.RUnlock()
-
-	sessions, exists := s.userSessions[userID]
-	if !exists {
-		return true
-	}
-
-	return len(sessions) < s.config.WebSocket.MaxConnectionsPerUser
-}
-
 // handleAudioMessage обрабатывает сообщение с аудиоданными
-func (s *Server) handleAudioMessage(session *Session, message WebSocketMessage) {
-	// Разбор аудиоданных
-	var audioData AudioData
-	if err := json.Unmarshal(message.Data, &audioData); err != nil {
-		s.logger.Error(fmt.Sprintf("Error parsing audio data: %v", err))
-		s.sendError(session, "DATA_ERROR", "Invalid audio data format")
-		return
-	}
-
-	// Проверяем, не пусты ли данные
-	if len(audioData.Samples) == 0 {
-		s.logger.Error("Empty audio data received")
-		s.sendError(session, "DATA_ERROR", "Empty audio data")
-		return
-	}
-
-	session.mutex.Lock()
+func (s *Server) handleAudioMessage(session *WSSession, message WebSocketMessage) {
+	session.Mutex.Lock()
 
 	// Проверяем, начата ли сессия
 	if !session.Started {
@@ -460,186 +311,67 @@ func (s *Server) handleAudioMessage(session *Session, message WebSocketMessage) 
 		session.Started = true
 		session.StartTime = time.Now() // Сбрасываем время начала
 
-		if s.useRealtimeMode {
-			// Запускаем сессию реального времени
-			if err := s.startRealtimeTranscriptionSession(session); err != nil {
-				session.mutex.Unlock()
-				s.logger.Error(fmt.Sprintf("Failed to start realtime transcription: %v", err))
-				s.sendError(session, "TRANSCRIPTION_ERROR", "Failed to start transcription")
-				return
-			}
-		} else {
-			// Режим с сохранением аудио в файл (отключен)
-			audioFilePath, err := s.audioService.Create(session.UserID, session.ID, session.SampleRate)
-			if err != nil {
-				session.mutex.Unlock()
-				s.logger.Error(fmt.Sprintf("Failed to create audio file: %v", err))
-				s.sendError(session, "INTERNAL_ERROR", "Failed to prepare for recording")
-				return
-			}
-			session.AudioFilePath = audioFilePath
+		// Инициализируем сессию
+		err := s.processor.StartSession(session.ID, func(text string) {
+			s.sendPartialMessage(session, text)
+		})
+		if err != nil {
+			session.Mutex.Unlock()
+			s.logger.Error(fmt.Sprintf("Failed to start session: %v", err))
+			s.sendError(session, ErrorCodeSessionError, ErrorMessageFailedToStartSession)
+			return
 		}
+
+		s.logger.Info(fmt.Sprintf("Started realtime transcription session: %s for user: %d", session.ID, session.UserID))
 	}
 
-	// В зависимости от режима обрабатываем аудиоданные
-	if s.useRealtimeMode {
-		// Режим реального времени
-		session.mutex.Unlock() // Разблокируем мьютекс перед долгой операцией отправки
+	session.Mutex.Unlock()
 
-		// Отправляем аудиоданные в реалтайм транскрипцию
-		if err := s.transcriberService.AppendAudio(context.Background(), session.ID, audioData.Samples); err != nil {
-			s.logger.Error(fmt.Sprintf("Error appending audio to realtime session: %v", err))
-			s.sendError(session, "TRANSCRIPTION_ERROR", "Failed to process audio data")
-			return
-		}
-	} else {
-
-		// Декодируем данные из Base64
-		rawAudioBytes, err := base64.StdEncoding.DecodeString(audioData.Samples)
-		if err != nil {
-			s.logger.Error(fmt.Sprintf("Error decoding base64 audio data: %v", err))
-			s.sendError(session, "DATA_ERROR", "Error decoding base64 audio data")
-			return
-		}
-		// Режим с сохранением в файл (отключен)
-		// Создаем структуру с форматом аудио
-		format := &AudioFormat{
-			Format:     session.Format,
-			SampleRate: session.SampleRate,
-		}
-
-		// Получаем процессор для указанного формата
-		processor, err := ValidateAndGetProcessor(format)
-		if err != nil {
-			session.mutex.Unlock()
-			s.logger.Error(fmt.Sprintf("Error with audio format: %v", err))
-			s.sendError(session, "FORMAT_ERROR", err.Error())
-			return
-		}
-		// Обработка аудиоданных с соответствующим процессором
-		processedData, err := processor.Process(rawAudioBytes)
-		if err != nil {
-			session.mutex.Unlock()
-			s.logger.Error(fmt.Sprintf("Error processing audio: %v", err))
-			s.sendError(session, "PROCESSING_ERROR", "Failed to process audio data")
-			return
-		}
-
-		// Записываем данные в файл
-		if err := s.audioService.WriteData(session.ID, processedData); err != nil {
-			session.mutex.Unlock()
-			s.logger.Error(fmt.Sprintf("Error writing to audio file: %v", err))
-			s.sendError(session, "INTERNAL_ERROR", "Failed to save audio data")
-			return
-		}
-		session.mutex.Unlock()
-	}
-}
-
-// waitForSubscriptionResult ожидает результат проверки подписки с таймаутом
-// Возвращает true, если у пользователя есть действительная подписка, false в противном случае
-// Если возникла ошибка (таймаут или отсутствие подписки), функция отправляет сообщение об ошибке,
-// но НЕ закрывает соединение (это делает вызывающий код)
-func (s *Server) waitForSubscriptionResult(session *Session) bool {
-	// Проверяем результат проверки подписки, которая была запущена при инициализации сессии
-	s.logger.Info(fmt.Sprintf("Checking subscription result for session: %s", session.ID))
-
-	select {
-	case isValid := <-session.subscriptionCheck:
-		if !isValid {
-			s.logger.Warn(fmt.Sprintf("Attempt to process audio with invalid subscription: %s for user: %d", session.ID, session.UserID))
-			s.sendError(session, "SUBSCRIPTION_ERROR", "Valid subscription required to process audio")
-			return false
-		}
-		return true
-
-	case <-time.After(5 * time.Second): // Таймаут ожидания проверки подписки
-		s.logger.Error(fmt.Sprintf("Subscription check timeout for session: %s", session.ID))
-		s.sendError(session, "SUBSCRIPTION_ERROR", "Subscription check timeout")
-		return false
+	// Обрабатываем аудиосообщение
+	if err := s.processor.HandleAudioMessage(session.ID, message.Data); err != nil {
+		s.logger.Error(fmt.Sprintf("Error handling audio message: %v", err))
+		s.sendError(session, ErrorCodeProcessingError, ErrorMessageFailedToProcessAudio)
+		return
 	}
 }
 
 // handleStopMessage обрабатывает сообщение об окончании записи
-func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
+func (s *Server) handleStopMessage(session *WSSession, _ WebSocketMessage) {
 	// Блокируем сессию для проверки
-	session.mutex.Lock()
+	session.Mutex.Lock()
 
 	// Проверяем, была ли начата сессия
 	if !session.Started {
-		session.mutex.Unlock()
+		session.Mutex.Unlock()
 		s.logger.Warn(fmt.Sprintf("Attempt to stop not started session: %s for user: %d", session.ID, session.UserID))
-		s.sendError(session, "SESSION_ERROR", "Session not started")
+		s.sendError(session, ErrorCodeSessionError, ErrorMessageSessionNotStarted)
 		// Закрываем соединение после ошибки
 		go s.closeSession(session)
 		return
 	}
 
-	// Проверяем подписку пользователя
-	if !s.waitForSubscriptionResult(session) {
+	// Освобождаем мьютекс перед блокирующей операцией проверки подписки
+	session.Mutex.Unlock()
+
+	// Проверяем подписку пользователя (может заблокироваться на 5 секунд)
+	if !s.waitForSubscriptionStatus(session) {
 		// Подписка недействительна или произошел таймаут, закрываем соединение
 		go s.closeSession(session)
 		return
 	}
 
-	// Завершаем сессию в зависимости от режима
-	var result string
-	var err error
-
-	if s.useRealtimeMode && session.RealtimeMode {
-		// Режим реального времени
-		// Сохраняем последний известный текст
-		result = session.LastTranscriptText
-		session.Started = false
-		// Разблокируем мьютекс до вызова CompleteSession, чтобы избежать блокировок
-		session.mutex.Unlock()
-
-		// Завершаем сессию транскрипции
-		if finalResult, err := s.transcriberService.CompleteSession(context.Background(), session.ID); err == nil && finalResult != nil {
-			// Обновляем результат, если он получен успешно
-			result = finalResult.Text
-		} else if err != nil {
-			s.logger.Error(fmt.Sprintf("Error completing realtime session: %v", err))
-		}
-
-	} else {
-		// Режим с сохранением в файл (отключен)
-		if _, err := s.audioService.Close(session.ID); err != nil {
-			s.logger.Error(fmt.Sprintf("Error closing audio file: %v", err))
-		}
-		session.Started = false
-		session.mutex.Unlock()
-
-		// Обрабатываем собранные аудиоданные из файла
-		result, err = s.processAudioDataFromFile(session.ID, session.UserID)
-
-		if err != nil {
-			s.logger.Error(fmt.Sprintf("Error processing audio data: %v", err))
-			s.sendError(session, "PROCESSING_ERROR", "Failed to process audio data")
-			// Закрываем соединение после ошибки
-			go s.closeSession(session)
-			return
-		}
-	}
-
-	result, err = s.fixTextByLLM(context.Background(), result)
+	// Обрабатываем стоп-сообщение
+	text, err := s.processor.HandleStopMessage(session.ID)
 	if err != nil {
-		s.logger.Error(fmt.Sprintf("Error fixing text: %v", err))
+		s.logger.Error(fmt.Sprintf("Error handling stop message: %v", err))
+		s.sendError(session, ErrorCodeProcessingError, ErrorMessageFailedToStopMessage)
+		// Закрываем соединение после ошибки
+		go s.closeSession(session)
+		return
 	}
 
-	// Отправляем результат обработки клиенту
-	completedData := CompletedData{
-		Text: result,
-	}
-	completedDataJSON, _ := json.Marshal(completedData)
-	response := WebSocketMessage{
-		Type:      MessageTypeCompleted,
-		SessionID: session.ID,
-		Data:      completedDataJSON,
-	}
-
-	if err := s.sendMessage(session, response); err != nil {
-		s.logger.Error(fmt.Sprintf("Error sending result: %v", err))
+	if err := s.sendCompletedMessage(session, text); err != nil {
+		s.logger.Error(fmt.Sprintf("Error sending completed message: %v", err))
 	}
 
 	// Закрываем соединение после отправки результата
@@ -647,54 +379,134 @@ func (s *Server) handleStopMessage(session *Session, _ WebSocketMessage) {
 	go s.closeSession(session)
 }
 
-func (s *Server) fixTextByLLM(ctx context.Context, text string) (string, error) {
-	return s.textGenerationService.FixText(ctx, text)
-}
+// Helpers for sending messages ------------------------------------------------
 
-// sendError отправляет сообщение об ошибке клиенту
-func (s *Server) sendError(session *Session, code string, message string) {
-	errorData := ErrorData{
-		Code:    code,
-		Message: message,
-	}
-
-	errorDataJSON, _ := json.Marshal(errorData)
-	response := WebSocketMessage{
-		Type:      MessageTypeError,
-		SessionID: session.ID,
-		Data:      errorDataJSON,
-	}
-
-	if err := s.sendMessage(session, response); err != nil {
-		s.logger.Error(fmt.Sprintf("Error sending error message: %v", err))
-	}
+// isSessionActive проверяет, активна ли сессия (существует ли в списке сессий)
+func (s *Server) isSessionActive(sessionID string) bool {
+	s.sessionMutex.RLock()
+	defer s.sessionMutex.RUnlock()
+	_, exists := s.sessions[sessionID]
+	return exists
 }
 
 // sendMessage отправляет сообщение клиенту
-func (s *Server) sendMessage(session *Session, message WebSocketMessage) error {
+func (s *Server) sendMessage(session *WSSession, message WebSocketMessage) error {
+	// Проверяем, что сессия еще активна
+	if !s.isSessionActive(session.ID) {
+		return fmt.Errorf("session %s is already closed", session.ID)
+	}
+
 	data, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
 
-	session.mutex.Lock()
-	defer session.mutex.Unlock()
+	session.Mutex.Lock()
+	defer session.Mutex.Unlock()
 
 	return session.Conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// sendError отправляет сообщение об ошибке клиенту
+func (s *Server) sendError(session *WSSession, code string, message string) {
+	errorDataJSON, _ := json.Marshal(ErrorData{
+		Code:    code,
+		Message: message,
+	})
+	response := WebSocketMessage{
+		Type:      MessageTypeError,
+		SessionID: session.ID,
+		Data:      errorDataJSON,
+	}
+	if err := s.sendMessage(session, response); err != nil {
+		s.logger.Error(fmt.Sprintf("Error sending error message: %v", err))
+	}
+}
+
+func (s *Server) sendPartialMessage(session *WSSession, text string) {
+	partialDataJSON, _ := json.Marshal(PartialData{
+		Text: text,
+	})
+	response := WebSocketMessage{
+		Type:      MessageTypePartial,
+		SessionID: session.ID,
+		Data:      partialDataJSON,
+	}
+
+	if err := s.sendMessage(session, response); err != nil {
+		s.logger.Error(fmt.Sprintf("Error sending partial result: %v", err))
+	}
+
+	s.logger.Info(fmt.Sprintf("Partial result sent for session: %s", session.ID))
+}
+
+func (s *Server) sendCompletedMessage(session *WSSession, text string) error {
+	completedDataJSON, _ := json.Marshal(CompletedData{
+		Text: text,
+	})
+	response := WebSocketMessage{
+		Type:      MessageTypeCompleted,
+		SessionID: session.ID,
+		Data:      completedDataJSON,
+	}
+	if err := s.sendMessage(session, response); err != nil {
+		s.logger.Error("Error sending result: " + err.Error())
+		return fmt.Errorf(ErrorMessageFailedToSendResult+": %w", err)
+	}
+
+	return nil
+}
+
+// CLOSE SESSION
+
+// closeSession закрывает сессию и удаляет её из списка активных сессий
+func (s *Server) closeSession(session *WSSession) {
+	s.sessionMutex.Lock()
+	defer s.sessionMutex.Unlock()
+
+	// Проверяем, не была ли сессия уже закрыта
+	_, exists := s.sessions[session.ID]
+	if !exists {
+		// Сессия уже была закрыта, ничего не делаем
+		return
+	}
+
+	// Закрываем сессию через соответствующий сервис
+	if err := s.processor.CloseSession(session.ID); err != nil {
+		s.logger.Warn(fmt.Sprintf("Error closing session: %v", err))
+	}
+
+	// Корректно закрываем WebSocket соединение
+	if session.Conn != nil {
+		s.gracefulCloseConn(session.Conn)
+	}
+
+	// Удаляем сессию из списка
+	delete(s.sessions, session.ID)
+
+	// Удаляем сессию из списка сессий пользователя
+	if sessions, exists := s.userSessions[session.UserID]; exists {
+		delete(sessions, session.ID)
+		if len(sessions) == 0 {
+			delete(s.userSessions, session.UserID)
+		}
+	}
+
+	s.logger.Info(fmt.Sprintf("Session closed: %s for user: %d", session.ID, session.UserID))
 }
 
 // gracefulCloseConn корректно закрывает WebSocket соединение в соответствии с протоколом
 // Отправляет Close фрейм и ждет подтверждения от клиента с таймаутом
 func (s *Server) gracefulCloseConn(conn *websocket.Conn) {
 	// Устанавливаем дедлайн для закрытия соединения
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(GracefulCloseTimeout)
 	if err := conn.SetWriteDeadline(deadline); err != nil {
 		s.logger.Warn(fmt.Sprintf("Failed to set write deadline for close: %v", err))
 	}
 
 	// Отправляем фрейм Close с кодом и сообщением
 	// 1000 - нормальное закрытие, "closing" - причина закрытия
-	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "closing")
+	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, CloseMessageText)
 	if err := conn.WriteMessage(websocket.CloseMessage, closeMsg); err != nil {
 		s.logger.Warn(fmt.Sprintf("Error sending close message: %v", err))
 		// Если не удалось отправить close фрейм, просто закрываем соединение
@@ -720,58 +532,25 @@ func (s *Server) gracefulCloseConn(conn *websocket.Conn) {
 	}
 }
 
-// closeSession закрывает сессию и удаляет её из списка активных сессий
-func (s *Server) closeSession(session *Session) {
-	s.sessionMutex.Lock()
-	defer s.sessionMutex.Unlock()
+// USER AUTH AND SUBSCRIPTION ----------------------------------------------------------------
 
-	// Проверяем, не была ли сессия уже закрыта
-	_, exists := s.sessions[session.ID]
-	if !exists {
-		// Сессия уже была закрыта, ничего не делаем
-		return
+// validateToken проверяет JWT-токен и возвращает ID пользователя в виде строки
+func (s *Server) validateToken(tokenString string) (uint64, error) {
+	s.logger.Debug(fmt.Sprintf("Validating token: %s", tokenString))
+	// Используем AuthService для проверки токена
+	userID, err := s.authService.ValidateToken(tokenString)
+	if err != nil {
+		return 0, fmt.Errorf("token validation error: %w", err)
 	}
 
-	// Закрываем ресурсы в зависимости от режима
-	if s.useRealtimeMode && session.RealtimeMode {
-		// Закрываем сессию реального времени
-		// if session.ID != "" {
-		// 	if err := s.transcriberService.CloseSession(context.Background(), session.ID); err != nil {
-		// 		s.logger.Warn(fmt.Sprintf("Error closing realtime session: %v", err))
-		// 	} else {
-		// 		s.logger.Info(fmt.Sprintf("Successfully closed realtime session: %s", session.ID))
-		// 	}
-		// }
-	} else {
-		// Закрываем аудиофайл
-		if _, err := s.audioService.Close(session.ID); err != nil {
-			s.logger.Warn(fmt.Sprintf("Error closing audio file: %v", err))
-		}
-	}
-
-	// Корректно закрываем WebSocket соединение
-	if session.Conn != nil {
-		s.gracefulCloseConn(session.Conn)
-	}
-
-	// Удаляем сессию из списка
-	delete(s.sessions, session.ID)
-
-	// Удаляем сессию из списка сессий пользователя
-	if sessions, exists := s.userSessions[session.UserID]; exists {
-		delete(sessions, session.ID)
-		if len(sessions) == 0 {
-			delete(s.userSessions, session.UserID)
-		}
-	}
-
-	s.logger.Info(fmt.Sprintf("Session closed: %s for user: %d", session.ID, session.UserID))
+	// Преобразуем ID пользователя в строку
+	return userID, nil
 }
 
-// checkUserSubscription проверяет наличие активной подписки у пользователя
-// Возвращает true, если у пользователя есть активная подписка, и false в противном случае
+// getUserSubscription проверяет наличие активной подписки у пользователя
+// Возвращает SubscriptionDTO с результатом проверки подписки
 // В текущей реализации это заглушка, которую нужно заменить на реальную проверку
-func (s *Server) checkUserSubscription(userID uint64) (bool, error) {
+func (s *Server) getUserSubscription(userID uint64) (*dto.SubscriptionDTO, error) {
 	s.logger.Debug(fmt.Sprintf("Checking subscription for user: %d", userID))
 	// Имитация задержки при проверке подписки
 	time.Sleep(1000 * time.Millisecond)
@@ -783,93 +562,84 @@ func (s *Server) checkUserSubscription(userID uint64) (bool, error) {
 	// 4. Возможно, обновления счетчиков использования
 
 	// Заглушка: считаем, что у всех пользователей есть подписка
-	// return true, nil
-	return true, nil
+	return &dto.SubscriptionDTO{
+		IsValid: true,
+	}, nil
 }
 
-// processAudioDataFromFile обрабатывает собранные аудиоданные из файла и возвращает результат распознавания
-func (s *Server) processAudioDataFromFile(
-	sessionID string,
-	userID uint64) (string, error) {
+// startCheckSubscription запускает асинхронную проверку подписки пользователя
+// и сохраняет результат в session.subscriptionValid
+func (s *Server) startCheckSubscription(session *WSSession) {
+	// Запускаем проверку в горутине, чтобы не блокировать основной поток
+	go func() {
+		session.subscriptionOnce.Do(func() {
+			s.logger.Debug(fmt.Sprintf("Checking subscription for user: %d", session.UserID))
+			subscription, err := s.getUserSubscription(session.UserID)
 
-	// return "Пример текста распознавания (из файла)", nil
-	// time.Sleep(4000 * time.Millisecond)
+			if err != nil {
+				s.logger.Error(fmt.Sprintf("Failed to check subscription: %v", err))
+				// При ошибке проверки считаем, что подписки нет
+				session.Mutex.Lock()
+				session.subscriptionValid = false
+				session.Mutex.Unlock()
 
-	// Используем audioService для обработки файла с аудиоданными
-	// // result, err := s.transcriberService.Transcribe(context.Background(), &dto.TranscriberRequest{
-	// // 	SessionID: sessionID,
-	// // 	UserID:    userID,
-	// // })
-	// if err != nil {
-	// 	return "", fmt.Errorf("error processing audio data: %w", err)
-	// }
+				// Отправляем сообщение об ошибке
+				s.sendError(session, ErrorCodeSubscriptionError, ErrorMessageFailedToCheckSubscription)
 
-	// return result.Text, nil
-	return "Пример текста распознавания (из файла)", nil
+				// Закрываем соединение только при ошибке проверки
+				go s.closeSession(session)
+				return
+			}
+
+			// Сохраняем результат проверки под защитой мьютекса
+			session.Mutex.Lock()
+			session.subscriptionValid = subscription.IsValid
+			session.Mutex.Unlock()
+
+			if !subscription.IsValid {
+				s.logger.Warn(fmt.Sprintf("User has no valid subscription: %d", session.UserID))
+				s.sendError(session, ErrorCodeSubscriptionError, ErrorMessageUserNoValidSubscription)
+				go s.closeSession(session)
+
+			} else {
+				s.logger.Info(fmt.Sprintf("Valid subscription confirmed for user: %d", session.UserID))
+			}
+		})
+	}()
 }
 
-// startRealtimeTranscriptionSession запускает сессию транскрипции в реальном времени
-// и настраивает обработку результатов
-func (s *Server) startRealtimeTranscriptionSession(session *Session) error {
-	// Создаем параметры для сессии реалтайм транскрипции
-	options := &dto.RealtimeSessionOptions{
-		SessionID: session.ID,
-		UserID:    session.UserID,
-		Format:    "pcm16",
-		Language:  "ru",
-		// Можно добавить язык, промпт и другие опции при необходимости
-	}
+// waitForSubscriptionStatus ожидает результат проверки подписки с таймаутом
+// Возвращает true, если у пользователя есть действительная подписка, false в противном случае
+func (s *Server) waitForSubscriptionStatus(session *WSSession) bool {
+	s.logger.Info(fmt.Sprintf("Checking subscription result for session: %s", session.ID))
 
-	// Запускаем сессию транскрипции
-	sessionID, resultCh, err := s.transcriberService.StartSession(context.Background(), options)
-	if err != nil {
-		return fmt.Errorf("failed to start realtime transcription session: %w", err)
-	}
+	// Ждем завершения проверки подписки с таймаутом
+	done := make(chan struct{})
+	go func() {
+		session.subscriptionOnce.Do(func() {})
+		close(done)
+	}()
 
-	// Сохраняем информацию о сессии
-	session.RealtimeResultCh = resultCh
-	session.RealtimeMode = true
+	select {
+	case <-done:
+		// Проверка завершена, читаем результат под защитой мьютекса
+		session.Mutex.Lock()
+		isValid := session.subscriptionValid
+		session.Mutex.Unlock()
 
-	// Запускаем горутину для обработки результатов транскрипции
-	go s.handleRealtimeResults(session)
-
-	s.logger.Info(fmt.Sprintf("Started realtime transcription session: %s for user: %d", sessionID, session.UserID))
-
-	return nil
-}
-
-// handleRealtimeResults обрабатывает результаты транскрипции в реальном времени
-// и отправляет их клиенту через WebSocket
-func (s *Server) handleRealtimeResults(session *Session) {
-	if session.RealtimeResultCh == nil {
-		s.logger.Error(fmt.Sprintf("Realtime result channel is nil for session: %s", session.ID))
-		return
-	}
-
-	// Обрабатываем результаты из канала, пока он не закроется
-	for result := range session.RealtimeResultCh {
-		if result == nil {
-			continue
+		if isValid {
+			s.logger.Info(fmt.Sprintf("Subscription valid for session: %s", session.ID))
+			return true
+		} else {
+			s.logger.Warn(fmt.Sprintf("Subscription invalid for session: %s for user: %d", session.ID, session.UserID))
+			s.sendError(session, ErrorCodeSubscriptionError, ErrorMessageValidSubscriptionRequired)
+			return false
 		}
 
-		// Сохраняем последний текст
-		session.LastTranscriptText = result.Text
-
-		// Отправляем частичный результат клиенту
-		partialData := PartialData{
-			Text: result.Text,
-		}
-		partialDataJSON, _ := json.Marshal(partialData)
-		response := WebSocketMessage{
-			Type:      MessageTypePartial,
-			SessionID: session.ID,
-			Data:      partialDataJSON,
-		}
-
-		if err := s.sendMessage(session, response); err != nil {
-			s.logger.Error(fmt.Sprintf("Error sending partial result: %v", err))
-		}
+	case <-time.After(SubscriptionCheckTimeout):
+		// Таймаут ожидания проверки подписки
+		s.logger.Error(fmt.Sprintf("Subscription check timeout for session: %s", session.ID))
+		s.sendError(session, ErrorCodeSubscriptionError, ErrorMessageSubscriptionCheckTimeout)
+		return false
 	}
-
-	s.logger.Info(fmt.Sprintf("Realtime result channel closed for session: %s", session.ID))
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"gitlab.com/voice-keyboard/backend-go/internal/dto"
+	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 )
@@ -149,7 +150,6 @@ func NewRealtimeSession(
 	config *pkg.Config,
 	logger logger.Logger,
 	sessionID string,
-	userID uint64,
 	format string,
 	language string,
 ) *RealtimeSession {
@@ -157,7 +157,6 @@ func NewRealtimeSession(
 
 	return &RealtimeSession{
 		ID:                   sessionID,
-		UserID:               userID,
 		Format:               format,
 		Language:             language,
 		ResultCh:             resultCh,
@@ -491,16 +490,14 @@ func (s *RealtimeTranscriberService) cleanSessions() {
 // StartSession начинает новую сессию транскрибации в реальном времени
 func (s *RealtimeTranscriberService) StartSession(
 	ctx context.Context,
-	options *dto.RealtimeSessionOptions,
+	options *interfaces.RealtimeSessionOptions,
 ) (string, <-chan *dto.TranscriberResult, error) {
-	sessionID := options.SessionID
 
 	// Создаем новую сессию с собственным подключением
 	session := NewRealtimeSession(
 		s.config,
 		s.logger,
-		sessionID,
-		options.UserID,
+		options.SessionID,
 		options.Format,
 		options.Language,
 		// options.Prompt,
@@ -513,12 +510,12 @@ func (s *RealtimeTranscriberService) StartSession(
 
 	// Регистрируем сессию
 	s.sessionsMutex.Lock()
-	s.sessions[sessionID] = session
+	s.sessions[session.ID] = session
 	s.sessionsMutex.Unlock()
 
-	s.logger.Info(fmt.Sprintf("Started new realtime transcription session: %s for user: %d", sessionID, options.UserID))
+	s.logger.Info(fmt.Sprintf("Started new realtime transcription session: %s", session.ID))
 
-	return sessionID, session.ResultCh, nil
+	return session.ID, session.ResultCh, nil
 }
 
 // AppendAudio добавляет аудиоданные в текущую сессию

@@ -1,4 +1,4 @@
-package dto
+package openai
 
 // Message представляет сообщение для генерации текста в формате OpenAI
 type Message struct {
@@ -70,9 +70,9 @@ type ResponseRequest struct {
 
 // OutputContent представляет содержимое ответа
 type OutputContent struct {
-	Type        string        `json:"type"`
-	Text        string        `json:"text"`
-	Annotations []interface{} `json:"annotations"`
+	Type        string `json:"type"`
+	Text        string `json:"text"`
+	Annotations []any  `json:"annotations"`
 }
 
 // OutputMessage представляет сообщение в ответе от Responses API

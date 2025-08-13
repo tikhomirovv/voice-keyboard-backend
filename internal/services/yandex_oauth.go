@@ -20,6 +20,25 @@ type YandexOAuthService struct {
 	log    logger.Logger
 }
 
+// YandexTokenResponse представляет ответ с токеном от Яндекса
+type YandexTokenResponse struct {
+	TokenType    string `json:"token_type"`
+	AccessToken  string `json:"access_token"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	Scope        string `json:"scope"`
+}
+
+// YandexUserInfo представляет информацию о пользователе от Яндекса
+type YandexUserInfo struct {
+	ID        string `json:"id"`
+	Login     string `json:"login"`
+	Name      string `json:"name"`
+	Email     string `json:"default_email"`
+	RealName  string `json:"real_name"`
+	AvatarURL string `json:"default_avatar_id"`
+}
+
 // Убедимся что YandexOAuthService реализует интерфейс
 var _ interfaces.YandexOAuthServiceInterface = (*YandexOAuthService)(nil)
 
@@ -65,7 +84,7 @@ func (s *YandexOAuthService) GetAuthorizationURL(state string) string {
 }
 
 // ExchangeCodeForToken обменивает код авторизации на токен
-func (s *YandexOAuthService) exchangeCodeForToken(ctx context.Context, code string) (*dto.YandexTokenResponse, error) {
+func (s *YandexOAuthService) exchangeCodeForToken(ctx context.Context, code string) (*YandexTokenResponse, error) {
 	data := url.Values{}
 	data.Set("grant_type", "authorization_code")
 	data.Set("code", code)
@@ -97,7 +116,7 @@ func (s *YandexOAuthService) exchangeCodeForToken(ctx context.Context, code stri
 		return nil, fmt.Errorf("YandexOAuthService.ExchangeCodeForToken: oauth error: %s - %s", errorResp.Error, errorResp.ErrorDescription)
 	}
 
-	var tokenResp dto.YandexTokenResponse
+	var tokenResp YandexTokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
 		return nil, fmt.Errorf("YandexOAuthService.ExchangeCodeForToken: decode token response: %w", err)
 	}
@@ -106,7 +125,7 @@ func (s *YandexOAuthService) exchangeCodeForToken(ctx context.Context, code stri
 }
 
 // GetUserInfo получает информацию о пользователе из API Яндекса
-func (s *YandexOAuthService) getUserInfo(ctx context.Context, accessToken string) (*dto.YandexUserInfo, error) {
+func (s *YandexOAuthService) getUserInfo(ctx context.Context, accessToken string) (*YandexUserInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", s.config.UserInfoURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("YandexOAuthService.GetUserInfo: create user info request: %w", err)
@@ -124,7 +143,7 @@ func (s *YandexOAuthService) getUserInfo(ctx context.Context, accessToken string
 		return nil, fmt.Errorf("YandexOAuthService.GetUserInfo: user info request failed with status %d", resp.StatusCode)
 	}
 
-	var userInfo dto.YandexUserInfo
+	var userInfo YandexUserInfo
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
 		return nil, fmt.Errorf("YandexOAuthService.GetUserInfo: decode user info response: %w", err)
 	}
