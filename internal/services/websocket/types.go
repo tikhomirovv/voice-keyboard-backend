@@ -2,7 +2,6 @@ package websocket
 
 import (
 	"encoding/json"
-	"os"
 	"sync"
 	"time"
 
@@ -67,8 +66,6 @@ type WSSession struct {
 }
 
 type WSSessionAudioOptions struct {
-	Format        string
-	SampleRate    uint32
-	AudioFilePath string   // Путь к временному файлу с аудиоданными
-	AudioFile     *os.File // Дескриптор файла для записи аудиоданных
+	Format     string
+	SampleRate uint32
 }

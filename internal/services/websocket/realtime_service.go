@@ -108,7 +108,7 @@ func NewRealtimeWebSocketService(
 	}
 }
 
-func (s *RealtimeWebSocketService) CreateSession(sessionID string, callback func(result string)) *Session {
+func (s *RealtimeWebSocketService) createSession(sessionID string, callback func(result string)) *Session {
 	session := &Session{
 		id:                 sessionID,
 		lastTranscriptText: "",
@@ -169,18 +169,18 @@ func (s *RealtimeWebSocketService) GetSessionsCount() int {
 }
 
 // StartSession инициализирует сессию для обработки аудио в реальном времени
-func (s *RealtimeWebSocketService) StartSession(sessionID string, callback func(result string)) error {
-	session := s.CreateSession(sessionID, callback)
+func (s *RealtimeWebSocketService) StartSession(sessionID string, options *interfaces.ProcessorSessionOptions) error {
+	session := s.createSession(sessionID, options.Callback)
 
 	// Создаем параметры для сессии реалтайм транскрипции
-	options := &interfaces.RealtimeSessionOptions{
+	realtimeOptions := &interfaces.RealtimeSessionOptions{
 		SessionID: sessionID,
-		Format:    DefaultAudioFormat,
+		Format:    options.Format,
 		Language:  DefaultLanguage,
 	}
 
 	// Запускаем сессию транскрипции
-	_, resultCh, err := s.transcriberService.StartSession(context.Background(), options)
+	_, resultCh, err := s.transcriberService.StartSession(context.Background(), realtimeOptions)
 	if err != nil {
 		return fmt.Errorf("failed to start realtime transcription session: %w", err)
 	}
