@@ -662,7 +662,7 @@ func (s *RealtimeTranscriberService) CloseSession(ctx context.Context, sessionID
 		s.logger.Warn(fmt.Sprintf("Error closing session %s: %v", sessionID, err))
 	}
 
-	s.logger.Info(fmt.Sprintf("Cancelled realtime transcription session: %s", sessionID))
+	s.logger.Info(fmt.Sprintf("Closed realtime transcription session: %s", sessionID))
 
 	return nil
 }
