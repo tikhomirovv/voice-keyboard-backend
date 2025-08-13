@@ -36,7 +36,7 @@ const (
 
 	// Таймауты и интервалы
 	sessionInactivityTimeout = 1 * time.Minute  // Таймаут неактивности сессии для очистки
-	transcriptionWaitTimeout = 30 * time.Second // Таймаут ожидания завершения транскрипции
+	transcriptionWaitTimeout = 10 * time.Second // Таймаут ожидания завершения транскрипции (уменьшил с 30 до 10)
 )
 
 // RealtimeSession представляет сессию транскрипции с собственным подключением к OpenAI
@@ -63,10 +63,8 @@ type RealtimeSession struct {
 	ready     bool            // Флаг готовности сессии
 	isSpeech  bool            // Флаг, указывающий, идет ли речь
 
-	// Поля для отслеживания завершения транскрипции
-	pendingCompletionCh  chan struct{} // Канал для сигнала о завершении после запроса
-	waitingForCompletion bool          // Флаг ожидания завершения
-	completionMutex      sync.Mutex    // Мьютекс для защиты флагов завершения
+	// Упрощенное ожидание completed события
+	completionCh chan struct{} // Канал для сигнала о получении completed события
 }
 
 // RealtimeEvent описывает структуру события от Realtime API
@@ -156,19 +154,18 @@ func NewRealtimeSession(
 	resultCh := make(chan *dto.TranscriberResult, 10)
 
 	return &RealtimeSession{
-		ID:                   sessionID,
-		Format:               format,
-		Language:             language,
-		ResultCh:             resultCh,
-		Created:              time.Now(),
-		LastActive:           time.Now(),
-		config:               config,
-		logger:               logger,
-		closed:               false,
-		closeCh:              make(chan struct{}),
-		ready:                false,
-		pendingCompletionCh:  make(chan struct{}, 1), // Буферизованный канал для сигнала
-		waitingForCompletion: false,
+		ID:           sessionID,
+		Format:       format,
+		Language:     language,
+		ResultCh:     resultCh,
+		Created:      time.Now(),
+		LastActive:   time.Now(),
+		config:       config,
+		logger:       logger,
+		closed:       false,
+		closeCh:      make(chan struct{}),
+		ready:        false,
+		completionCh: make(chan struct{}),
 	}
 }
 
@@ -357,18 +354,12 @@ func (s *RealtimeSession) handleTranscriptionCompleted(event *RealtimeEvent) {
 		s.logger.Warn(fmt.Sprintf("Session %s: Failed to send transcript: channel full or closed", s.ID))
 	}
 
-	// Проверяем, ожидаем ли мы завершения транскрипции
-	s.completionMutex.Lock()
-	isWaiting := s.waitingForCompletion
-	s.completionMutex.Unlock()
-
-	// Если ожидаем завершения, отправляем сигнал
-	if isWaiting {
-		s.logger.Info(fmt.Sprintf("Session %s: Sending completion signal as requested", s.ID))
-		select {
-		case s.pendingCompletionCh <- struct{}{}:
-		default: // Неблокирующая отправка
-		}
+	// Отправляем сигнал о получении completed события
+	select {
+	case s.completionCh <- struct{}{}:
+		s.logger.Debug(fmt.Sprintf("Session %s: Sent completion signal", s.ID))
+	default:
+		// Неблокирующая отправка - если никто не ждет, просто игнорируем
 	}
 }
 
@@ -439,6 +430,20 @@ func (s *RealtimeSession) sendJSON(v any) error {
 // GetLastText возвращает последний полученный текст транскрипции
 func (s *RealtimeSession) GetLastText() string {
 	return s.lastText
+}
+
+// WaitForCompletion ожидает следующего completed события с таймаутом
+func (s *RealtimeSession) WaitForCompletion(ctx context.Context) bool {
+	select {
+	case <-s.completionCh:
+		return true
+	case <-time.After(transcriptionWaitTimeout):
+		return false
+	case <-ctx.Done():
+		return false
+	case <-s.closeCh:
+		return false
+	}
 }
 
 // NewRealtimeTranscriberService создает новый сервис транскрипции файлов с использованием OpenAI Realtime API
@@ -538,33 +543,6 @@ func (s *RealtimeTranscriberService) AppendAudio(ctx context.Context, sessionID 
 	return nil
 }
 
-// SetWaitingForCompletion устанавливает флаг ожидания завершения
-func (s *RealtimeSession) SetWaitingForCompletion() {
-	if s.isSpeech {
-		s.completionMutex.Lock()
-		defer s.completionMutex.Unlock()
-		s.waitingForCompletion = true
-	}
-}
-
-// WaitForNextCompletion ожидает следующего события завершения транскрипции
-func (s *RealtimeSession) WaitForNextCompletion(ctx context.Context) bool {
-	// Устанавливаем флаг ожидания
-	s.SetWaitingForCompletion()
-
-	// Ждём сигнала с учетом контекста
-	select {
-	case <-s.pendingCompletionCh:
-		return true
-	case <-time.After(transcriptionWaitTimeout):
-		return false
-	case <-ctx.Done():
-		return false
-	case <-s.closeCh:
-		return false
-	}
-}
-
 // CompleteSession завершает сессию транскрибации и возвращает финальный результат
 func (s *RealtimeTranscriberService) CompleteSession(ctx context.Context, sessionID string) (*dto.TranscriberResult, error) {
 	// Находим сессию
@@ -576,14 +554,14 @@ func (s *RealtimeTranscriberService) CompleteSession(ctx context.Context, sessio
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 
-	// Отправляем запрос на коммит аудиобуфера, чтобы сигнализировать о завершении
+	// Пытаемся коммитить буфер (может быть пустым - это нормально)
 	if err := session.commitAudioBuffer(); err != nil {
 		s.logger.Warn(fmt.Sprintf("Session %s: Failed to commit audio buffer: %v", sessionID, err))
 		// Продолжаем выполнение, поскольку это не критическая ошибка
 	}
 
-	// Запрашиваем ожидание следующего события завершения
-	completedSuccessfully := session.WaitForNextCompletion(ctx)
+	// Ждем следующего completed события или таймаута
+	completedSuccessfully := session.WaitForCompletion(ctx)
 
 	if !completedSuccessfully {
 		if ctx.Err() != nil {
