@@ -27,6 +27,7 @@ const (
 	eventTypeInputAudioBufferCommitted     = "conversation.item.input_audio_buffer.committed"
 	eventTypeTranscriptionSessionCreated   = "transcription_session.created"
 	eventTypeInputAudioBufferSpeechStarted = "input_audio_buffer.speech_started"
+	eventTypeInputAudioBufferSpeechStopped = "input_audio_buffer.speech_stopped" // Добавить эту строку
 	eventTypeError                         = "error"
 
 	// Типы событий от клиента к серверу
@@ -35,8 +36,8 @@ const (
 	eventTypeTranscriptionSession   = "transcription_session.update"
 
 	// Таймауты и интервалы
-	sessionInactivityTimeout = 1 * time.Minute  // Таймаут неактивности сессии для очистки
-	transcriptionWaitTimeout = 10 * time.Second // Таймаут ожидания завершения транскрипции (уменьшил с 30 до 10)
+	sessionInactivityTimeout = 1 * time.Minute // Таймаут неактивности сессии для очистки
+	transcriptionWaitTimeout = 6 * time.Second // Таймаут ожидания завершения транскрипции (уменьшил с 30 до 10)
 )
 
 // RealtimeSession представляет сессию транскрипции с собственным подключением к OpenAI
@@ -52,16 +53,20 @@ type RealtimeSession struct {
 	LastActive time.Time                   // Время последней активности
 
 	// Подключение к OpenAI
-	conn      *websocket.Conn // WebSocket соединение
-	config    *pkg.Config     // Конфигурация
-	logger    logger.Logger   // Логгер
-	closed    bool            // Флаг закрытия
-	closeCh   chan struct{}   // Канал для сигнала закрытия
-	connMutex sync.Mutex      // Мьютекс для соединения
-	itemID    string          // Текущий ID элемента в разговоре
-	lastText  string          // Последний полученный текст
-	ready     bool            // Флаг готовности сессии
-	isSpeech  bool            // Флаг, указывающий, идет ли речь
+	conn        *websocket.Conn // WebSocket соединение
+	config      *pkg.Config     // Конфигурация
+	logger      logger.Logger   // Логгер
+	closed      bool            // Флаг закрытия
+	closeCh     chan struct{}   // Канал для сигнала закрытия
+	connMutex   sync.Mutex      // Мьютекс для соединения
+	itemID      string          // Текущий ID элемента в разговоре
+	lastText    string          // Последний полученный текст
+	ready       bool            // Флаг готовности сессии
+	isSpeech    bool            // Флаг, указывающий, идет ли речь
+	isCompleted bool            // Флаг, указывающий, завершена ли обработка транскрипции
+
+	// Мьютекс для защиты флагов состояния
+	stateMutex sync.RWMutex
 
 	// Упрощенное ожидание completed события
 	completionCh chan struct{} // Канал для сигнала о получении completed события
@@ -310,6 +315,8 @@ func (s *RealtimeSession) handleMessages() {
 				s.handleAudioBufferCommitted(&event)
 			case eventTypeInputAudioBufferSpeechStarted:
 				s.handleAudioBufferSpeechStarted(&event)
+			case eventTypeInputAudioBufferSpeechStopped:
+				s.handleAudioBufferSpeechStopped(&event)
 			case eventTypeError:
 				s.logger.Error(fmt.Sprintf("Session %s: Received error from Realtime API: %+v", s.ID, event.Error))
 			case eventTypeTranscriptionSessionCreated:
@@ -335,7 +342,14 @@ func (s *RealtimeSession) handleTranscriptionDelta(event *RealtimeEvent) {
 
 func (s *RealtimeSession) handleAudioBufferSpeechStarted(_ *RealtimeEvent) {
 	s.logger.Debug(fmt.Sprintf("Session %s: Audio buffer speech started", s.ID))
-	s.isSpeech = true
+	s.setSpeechState(true)
+	s.setCompletedState(false) // Сбрасываем при начале новой речи
+}
+
+func (s *RealtimeSession) handleAudioBufferSpeechStopped(_ *RealtimeEvent) {
+	s.logger.Debug(fmt.Sprintf("Session %s: Audio buffer speech stopped", s.ID))
+	s.setSpeechState(false)
+	// isCompleted остается false - ждем completed события
 }
 
 // handleTranscriptionCompleted обрабатывает завершенные результаты транскрипции
@@ -349,15 +363,18 @@ func (s *RealtimeSession) handleTranscriptionCompleted(event *RealtimeEvent) {
 
 	select {
 	case s.ResultCh <- result:
-		s.logger.Info(fmt.Sprintf("Session %s: Sent transcript: %s", s.ID, event.Transcript))
+		s.logger.Info(fmt.Sprintf("Session %s: (completed) Sent transcript: %s", s.ID, event.Transcript))
 	default:
-		s.logger.Warn(fmt.Sprintf("Session %s: Failed to send transcript: channel full or closed", s.ID))
+		s.logger.Warn(fmt.Sprintf("Session %s: (completed) Failed to send transcript: channel full or closed", s.ID))
 	}
+
+	// Отмечаем, что транскрипция завершена
+	s.setCompletedState(true)
 
 	// Отправляем сигнал о получении completed события
 	select {
 	case s.completionCh <- struct{}{}:
-		s.logger.Debug(fmt.Sprintf("Session %s: Sent completion signal", s.ID))
+		s.logger.Debug(fmt.Sprintf("Session %s: (completed) Sent completion signal", s.ID))
 	default:
 		// Неблокирующая отправка - если никто не ждет, просто игнорируем
 	}
@@ -432,8 +449,41 @@ func (s *RealtimeSession) GetLastText() string {
 	return s.lastText
 }
 
+// IsSpeech возвращает состояние речи с блокировкой
+func (s *RealtimeSession) IsSpeech() bool {
+	s.stateMutex.RLock()
+	defer s.stateMutex.RUnlock()
+	return s.isSpeech
+}
+
+// IsCompleted возвращает состояние завершения с блокировкой
+func (s *RealtimeSession) IsCompleted() bool {
+	s.stateMutex.RLock()
+	defer s.stateMutex.RUnlock()
+	return s.isCompleted
+}
+
+// setSpeechState безопасно устанавливает состояние речи
+func (s *RealtimeSession) setSpeechState(isSpeech bool) {
+	s.stateMutex.Lock()
+	defer s.stateMutex.Unlock()
+	s.isSpeech = isSpeech
+}
+
+// setCompletedState безопасно устанавливает состояние завершения
+func (s *RealtimeSession) setCompletedState(isCompleted bool) {
+	s.stateMutex.Lock()
+	defer s.stateMutex.Unlock()
+	s.isCompleted = isCompleted
+}
+
 // WaitForCompletion ожидает следующего completed события с таймаутом
 func (s *RealtimeSession) WaitForCompletion(ctx context.Context) bool {
+	// Если уже обработано, сразу возвращаем true
+	if s.IsCompleted() {
+		return true
+	}
+
 	select {
 	case <-s.completionCh:
 		return true
@@ -554,24 +604,33 @@ func (s *RealtimeTranscriberService) CompleteSession(ctx context.Context, sessio
 		return nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 
-	// Пытаемся коммитить буфер (может быть пустым - это нормально)
-	if err := session.commitAudioBuffer(); err != nil {
-		s.logger.Warn(fmt.Sprintf("Session %s: Failed to commit audio buffer: %v", sessionID, err))
-		// Продолжаем выполнение, поскольку это не критическая ошибка
-	}
-
-	// Ждем следующего completed события или таймаута
-	completedSuccessfully := session.WaitForCompletion(ctx)
-
-	if !completedSuccessfully {
-		if ctx.Err() != nil {
-			s.logger.Warn(fmt.Sprintf("Session %s: Context cancelled while waiting for completion", sessionID))
-		} else {
-			s.logger.Warn(fmt.Sprintf("Session %s: Timeout waiting for next completion event after %v",
-				sessionID, transcriptionWaitTimeout))
+	// Коммитим буфер только если есть активная речь
+	if session.IsSpeech() {
+		s.logger.Info(fmt.Sprintf("Session %s: Active speech detected, committing audio buffer", sessionID))
+		if err := session.commitAudioBuffer(); err != nil {
+			s.logger.Warn(fmt.Sprintf("Session %s: Failed to commit audio buffer: %v", sessionID, err))
 		}
 	} else {
-		s.logger.Info(fmt.Sprintf("Session %s: Received completion event after request", sessionID))
+		s.logger.Info(fmt.Sprintf("Session %s: No active speech, skipping buffer commit", sessionID))
+	}
+
+	// Ждем завершения обработки только если еще не обработано
+	if !session.IsCompleted() {
+		s.logger.Info(fmt.Sprintf("Session %s: Waiting for transcription completion", sessionID))
+		completedSuccessfully := session.WaitForCompletion(ctx)
+
+		if !completedSuccessfully {
+			if ctx.Err() != nil {
+				s.logger.Warn(fmt.Sprintf("Session %s: Context cancelled while waiting for completion", sessionID))
+			} else {
+				s.logger.Warn(fmt.Sprintf("Session %s: Timeout waiting for completion after %v",
+					sessionID, transcriptionWaitTimeout))
+			}
+		} else {
+			s.logger.Info(fmt.Sprintf("Session %s: Received completion event", sessionID))
+		}
+	} else {
+		s.logger.Info(fmt.Sprintf("Session %s: Transcription already completed, no need to wait", sessionID))
 	}
 
 	// Создаем результат на основе последней информации

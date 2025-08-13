@@ -437,7 +437,7 @@ func (s *Server) sendPartialMessage(session *WSSession, text string) {
 		s.logger.Error(fmt.Sprintf("Error sending partial result: %v", err))
 	}
 
-	s.logger.Info(fmt.Sprintf("Partial result sent for session: %s", session.ID))
+	s.logger.Info(fmt.Sprintf("Partial result sent for session: %s, text: %s", session.ID, text))
 }
 
 func (s *Server) sendCompletedMessage(session *WSSession, text string) error {
