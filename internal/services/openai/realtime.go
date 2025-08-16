@@ -78,7 +78,7 @@ func (s *RealtimeSession) Connect() error {
 	headers.Set("OpenAI-Beta", "realtime=v1")
 
 	// Подключаемся к WebSocket серверу
-	s.logger.Info(fmt.Sprintf("Session %s: Connecting to OpenAI Realtime API", s.ID))
+	s.logger.Debug(fmt.Sprintf("Session %s: Connecting to OpenAI Realtime API", s.ID))
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), headers)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Realtime API: %w", err)
@@ -97,7 +97,7 @@ func (s *RealtimeSession) Connect() error {
 	go s.handleMessages()
 
 	s.ready = true
-	s.logger.Info(fmt.Sprintf("Session %s: Successfully connected to OpenAI Realtime API", s.ID))
+	s.logger.Info(fmt.Sprintf("Session %s: Connected to OpenAI Realtime API", s.ID))
 	return nil
 }
 
@@ -155,7 +155,7 @@ func (s *RealtimeSession) initTranscriptionSession() error {
 // handleMessages обрабатывает входящие сообщения от OpenAI Realtime API
 func (s *RealtimeSession) handleMessages() {
 	defer func() {
-		s.logger.Info(fmt.Sprintf("Session %s: Exiting OpenAI Realtime API message handler", s.ID))
+		s.logger.Debug(fmt.Sprintf("Session %s: Exiting OpenAI Realtime API message handler", s.ID))
 	}()
 
 	for {
@@ -170,7 +170,7 @@ func (s *RealtimeSession) handleMessages() {
 				select {
 				case <-s.closeCh:
 					// Канал закрыт, это нормальное завершение работы
-					s.logger.Info(fmt.Sprintf("Session %s: Connection closed normally", s.ID))
+					s.logger.Debug(fmt.Sprintf("Session %s: Connection closed normally", s.ID))
 				default:
 					// Канал не закрыт, это реальная ошибка чтения
 					s.logger.Error(fmt.Sprintf("Session %s: Error reading from Realtime API: %v", s.ID, err))
@@ -201,7 +201,7 @@ func (s *RealtimeSession) handleMessages() {
 				s.handleError(&event)
 			case eventTypeTranscriptionSessionCreated:
 				// Добавляем обработку события создания сессии транскрипции
-				s.logger.Info(fmt.Sprintf("Session %s: Transcription session successfully created", s.ID))
+				s.logger.Debug(fmt.Sprintf("Session %s: Transcription session created", s.ID))
 				if len(event.Metadata) > 0 {
 					metadataJSON, _ := json.Marshal(event.Metadata)
 					s.logger.Debug(fmt.Sprintf("Session %s: Session creation metadata: %s", s.ID, string(metadataJSON)))
@@ -238,9 +238,9 @@ func (s *RealtimeSession) handleTranscriptionCompleted(event *RealtimeEvent) {
 
 	select {
 	case s.ResultCh <- result:
-		s.logger.Info(fmt.Sprintf("Session %s: (completed) Sent transcript: %s", s.ID, event.Transcript))
+		s.logger.Debug(fmt.Sprintf("Session %s: Sent transcript: %s", s.ID, event.Transcript))
 	default:
-		s.logger.Warn(fmt.Sprintf("Session %s: (completed) Failed to send transcript: channel full or closed", s.ID))
+		s.logger.Warn(fmt.Sprintf("Session %s: Failed to send transcript: channel full or closed", s.ID))
 	}
 }
 
@@ -321,7 +321,7 @@ func (s *RealtimeSession) commitAudioBuffer() error {
 		return fmt.Errorf("failed to commit audio buffer: %w", err)
 	}
 
-	s.logger.Info(fmt.Sprintf("Session %s: Sent audio buffer commit request", s.ID))
+	s.logger.Debug(fmt.Sprintf("Session %s: Sent audio buffer commit request", s.ID))
 	return nil
 }
 
@@ -495,7 +495,6 @@ func (s *RealtimeSession) WaitForCompletion(ctx context.Context) bool {
 		case <-ticker.C:
 			// Проверяем статус всех элементов
 			pendingItems := s.GetPendingItemIDs()
-			s.logger.Info(fmt.Sprintf("Session %s: Pending items: %v", s.ID, pendingItems))
 			if len(pendingItems) == 0 {
 				s.logger.Info(fmt.Sprintf("Session %s: All items completed", s.ID))
 				return true
@@ -505,10 +504,10 @@ func (s *RealtimeSession) WaitForCompletion(ctx context.Context) bool {
 			s.logger.Warn(fmt.Sprintf("Session %s: Timeout waiting for completion of items", s.ID))
 			return false
 		case <-ctx.Done():
-			s.logger.Info(fmt.Sprintf("Session %s: Context done while waiting for completion", s.ID))
+			s.logger.Debug(fmt.Sprintf("Session %s: Context done while waiting for completion", s.ID))
 			return false
 		case <-s.closeCh:
-			s.logger.Info(fmt.Sprintf("Session %s: Connection closed while waiting for completion", s.ID))
+			s.logger.Debug(fmt.Sprintf("Session %s: Connection closed while waiting for completion", s.ID))
 			return false
 		}
 	}
@@ -523,16 +522,16 @@ func (s *RealtimeSession) WaitForCommitResult(ctx context.Context) (bool, error)
 	// Ждем события committed
 	select {
 	case <-s.commitCh:
-		s.logger.Info(fmt.Sprintf("Session %s: Received committed event", s.ID))
+		s.logger.Debug(fmt.Sprintf("Session %s: Received committed event", s.ID))
 		return true, nil
 	case <-time.After(commitTimeout):
 		s.logger.Warn(fmt.Sprintf("Session %s: Timeout waiting for committed event", s.ID))
 		return false, fmt.Errorf("timeout waiting for committed event")
 	case <-ctx.Done():
-		s.logger.Info(fmt.Sprintf("Session %s: Context done while waiting for committed", s.ID))
+		s.logger.Debug(fmt.Sprintf("Session %s: Context done while waiting for committed", s.ID))
 		return false, ctx.Err()
 	case <-s.closeCh:
-		s.logger.Info(fmt.Sprintf("Session %s: Connection closed while waiting for committed", s.ID))
+		s.logger.Debug(fmt.Sprintf("Session %s: Connection closed while waiting for committed", s.ID))
 		return false, fmt.Errorf("connection closed")
 	}
 }
@@ -540,7 +539,7 @@ func (s *RealtimeSession) WaitForCommitResult(ctx context.Context) (bool, error)
 // CommitAndWaitResult коммитит буфер и ждет результат коммита
 func (s *RealtimeSession) CommitAndWaitResult(ctx context.Context) (bool, error) {
 	// Коммитим буфер
-	s.logger.Info(fmt.Sprintf("Session %s: Committing audio buffer", s.ID))
+	s.logger.Debug(fmt.Sprintf("Session %s: Committing audio buffer", s.ID))
 	if err := s.commitAudioBuffer(); err != nil {
 		s.logger.Warn(fmt.Sprintf("Session %s: Failed to commit audio buffer: %v", s.ID, err))
 		return false, fmt.Errorf("failed to commit audio buffer: %w", err)
@@ -554,7 +553,7 @@ func (s *RealtimeSession) CommitAndWaitResult(ctx context.Context) (bool, error)
 
 	if !commitSuccessful {
 		// Коммит не удался (буфер пустой)
-		s.logger.Info(fmt.Sprintf("Session %s: Commit failed - buffer is empty", s.ID))
+		s.logger.Debug(fmt.Sprintf("Session %s: Commit failed - buffer is empty", s.ID))
 		return false, nil
 	}
 
@@ -635,7 +634,7 @@ func (s *RealtimeTranscriberService) StartSession(
 	s.sessions[session.ID] = session
 	s.sessionsMutex.Unlock()
 
-	s.logger.Info(fmt.Sprintf("Started new realtime transcription session: %s", session.ID))
+	s.logger.Info(fmt.Sprintf("Session %s: Started", session.ID))
 
 	return session.ID, session.ResultCh, nil
 }
@@ -675,7 +674,7 @@ func (s *RealtimeTranscriberService) CompleteSession(ctx context.Context, sessio
 	session.SetSpeech(false)
 
 	// Коммитим буфер и ждем результат
-	s.logger.Info(fmt.Sprintf("Session %s: Committing audio buffer and waiting for result", sessionID))
+	s.logger.Info(fmt.Sprintf("Session %s: Processing STOP request", sessionID))
 	completed, err := session.CommitAndWaitResult(ctx)
 	if err != nil {
 		s.logger.Warn(fmt.Sprintf("Session %s: Error during commit and wait: %v", sessionID, err))
@@ -685,7 +684,7 @@ func (s *RealtimeTranscriberService) CompleteSession(ctx context.Context, sessio
 		s.logger.Info(fmt.Sprintf("Session %s: Successfully completed all items", sessionID))
 	} else {
 		// Коммит не удался (буфер пустой) или не все элементы завершились
-		s.logger.Info(fmt.Sprintf("Session %s: Commit failed or not all items completed", sessionID))
+		s.logger.Debug(fmt.Sprintf("Session %s: Commit failed or not all items completed", sessionID))
 	}
 
 	// Создаем результат на основе всех завершенных транскрипций
@@ -718,7 +717,7 @@ func (s *RealtimeTranscriberService) CloseSession(ctx context.Context, sessionID
 		s.logger.Warn(fmt.Sprintf("Error closing session %s: %v", sessionID, err))
 	}
 
-	s.logger.Info(fmt.Sprintf("Closed realtime transcription session: %s", sessionID))
+	s.logger.Info(fmt.Sprintf("Session %s: Closed", sessionID))
 
 	return nil
 }
