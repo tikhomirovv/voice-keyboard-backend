@@ -1,5 +1,15 @@
 package openai
 
+import (
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"gitlab.com/voice-keyboard/backend-go/internal/dto"
+	"gitlab.com/voice-keyboard/backend-go/pkg"
+	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
+)
+
 // Message представляет сообщение для генерации текста в формате OpenAI
 type Message struct {
 	Role    string `json:"role" validate:"required,oneof=user assistant developer"`
@@ -117,4 +127,157 @@ type ResponseResult struct {
 	Usage              ResponseUsage   `json:"usage"`
 	User               any             `json:"user"`
 	Metadata           map[string]any  `json:"metadata"`
+}
+
+// Константы для работы с Realtime API
+const (
+	// WebSocket URL для Realtime API с intent=transcription
+	realtimeAPIURL = "wss://api.openai.com/v1/realtime"
+
+	// Типы событий от сервера к клиенту
+	eventTypeTranscriptionDelta            = "conversation.item.input_audio_transcription.delta"
+	eventTypeTranscriptionCompleted        = "conversation.item.input_audio_transcription.completed"
+	eventTypeTranscriptionSessionCreated   = "transcription_session.created"
+	eventTypeInputAudioBufferCommitted     = "input_audio_buffer.committed"
+	eventTypeInputAudioBufferSpeechStarted = "input_audio_buffer.speech_started"
+	eventTypeInputAudioBufferSpeechStopped = "input_audio_buffer.speech_stopped"
+	eventTypeError                         = "error"
+
+	// Типы событий от клиента к серверу
+	eventTypeInputAudioBufferAppend = "input_audio_buffer.append"
+	eventTypeInputAudioBufferCommit = "input_audio_buffer.commit"
+	eventTypeTranscriptionSession   = "transcription_session.update"
+
+	// Таймауты и интервалы
+	sessionInactivityTimeout = 1 * time.Minute // Таймаут неактивности сессии для очистки
+	transcriptionWaitTimeout = 5 * time.Second // Таймаут ожидания завершения транскрипции (уменьшил с 30 до 10)
+	commitTimeout            = 5 * time.Second // Таймаут ожидания коммита
+)
+
+// ItemStatus описывает статус элемента разговора
+type ItemStatus int
+
+const (
+	ItemCommitted ItemStatus = iota
+	ItemCompleted
+)
+
+// ConversationItem описывает элемент разговора с его статусом и текстом
+type ConversationItem struct {
+	ItemID         string     // ID элемента
+	PreviousItemID string     // ID предыдущего элемента (для определения порядка)
+	Status         ItemStatus // Статус: committed или completed
+	Transcript     string     // Текст транскрипции (заполняется при completed)
+}
+
+// RealtimeSession представляет сессию транскрипции с собственным подключением к OpenAI
+type RealtimeSession struct {
+	// Основная информация о сессии
+	ID         string                      // Уникальный идентификатор сессии
+	UserID     uint64                      // ID пользователя
+	Format     string                      // Формат аудио (pcm16 и т.д.)
+	Language   string                      // Язык транскрибации
+	Prompt     string                      // Промпт для транскрибации
+	ResultCh   chan *dto.TranscriberResult // Канал для отправки результатов транскрипции
+	Created    time.Time                   // Время создания сессии
+	LastActive time.Time                   // Время последней активности
+
+	// Подключение к OpenAI
+	conn      *websocket.Conn // WebSocket соединение
+	config    *pkg.Config     // Конфигурация
+	logger    logger.Logger   // Логгер
+	closed    bool            // Флаг закрытия
+	closeCh   chan struct{}   // Канал для сигнала закрытия
+	connMutex sync.Mutex      // Мьютекс для соединения
+	itemID    string          // Текущий ID элемента в разговоре
+	lastText  string          // Последний полученный текст
+	ready     bool            // Флаг готовности сессии
+
+	// Флаг активности речи и мьютекс для его защиты
+	isSpeech    bool
+	speechMutex sync.RWMutex
+
+	// Флаг ожидания коммита и канал для события committed
+	waitingCommit bool
+	commitCh      chan struct{} // Канал для сигнала о получении committed события
+
+	// Карта элементов разговора для отслеживания по item_id
+	conversationItems map[string]*ConversationItem
+	itemsMutex        sync.RWMutex
+}
+
+// RealtimeEvent описывает структуру события от Realtime API
+type RealtimeEvent struct {
+	EventID        string         `json:"event_id,omitempty"`
+	Type           string         `json:"type"`
+	ItemID         string         `json:"item_id,omitempty"`
+	ContentIndex   int            `json:"content_index,omitempty"`
+	Delta          string         `json:"delta,omitempty"`
+	Transcript     string         `json:"transcript,omitempty"`
+	PreviousItemID string         `json:"previous_item_id,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	Error          *RealtimeError `json:"error,omitempty"`
+}
+
+// RealtimeError описывает ошибку от Realtime API
+type RealtimeError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Param   string `json:"param,omitempty"`
+}
+
+// AudioBufferAppendEvent описывает событие для отправки аудиоданных
+type AudioBufferAppendEvent struct {
+	Type     string         `json:"type"`
+	Audio    string         `json:"audio"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// AudioBufferCommitEvent описывает событие для коммита аудиобуфера
+type AudioBufferCommitEvent struct {
+	Type string `json:"type"`
+}
+
+// TranscriptionSessionUpdateEvent описывает событие для обновления сессии транскрипции
+type TranscriptionSessionUpdateEvent struct {
+	Type    string        `json:"type"`
+	Session SessionObject `json:"session"`
+}
+
+type SessionObject struct {
+	InputAudioFormat         string                   `json:"input_audio_format"`
+	InputAudioTranscription  *InputAudioTranscription `json:"input_audio_transcription"`
+	TurnDetection            *TurnDetection           `json:"turn_detection"`
+	InputAudioNoiseReduction *NoiseReduction          `json:"input_audio_noise_reduction"`
+	Include                  []string                 `json:"include,omitempty"`
+}
+
+// InputAudioTranscription описывает настройки транскрипции
+type InputAudioTranscription struct {
+	Model    string `json:"model"`
+	Prompt   string `json:"prompt,omitempty"`
+	Language string `json:"language,omitempty"`
+}
+
+// TurnDetection описывает настройки обнаружения речи
+type TurnDetection struct {
+	Type string `json:"type"`
+	// Threshold         float64 `json:"threshold"`
+	PrefixPaddingMS   int `json:"prefix_padding_ms"`
+	SilenceDurationMS int `json:"silence_duration_ms"`
+	// Eagerness         string `json:"eagerness"` // (semantic_vad) "low" | "medium" | "high" | "auto", // optional
+}
+
+// NoiseReduction описывает настройки шумоподавления
+type NoiseReduction struct {
+	Type string `json:"type"`
+}
+
+// RealtimeTranscriberService реализует интерфейс RealtimeTranscriberServiceInterface
+// с использованием OpenAI Realtime API для транскрипции аудио в реальном времени
+type RealtimeTranscriberService struct {
+	config        *pkg.Config
+	logger        logger.Logger
+	sessionsMutex sync.RWMutex
+	sessions      map[string]*RealtimeSession
 }

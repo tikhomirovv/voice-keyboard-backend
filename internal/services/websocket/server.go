@@ -40,17 +40,17 @@ type Server struct {
 // NewServer создает новый WebSocket-сервер
 func NewServer(c *pkg.Container) *Server {
 	// Создаем сервисы для обработки WebSocket сообщений
-	// processor := NewRealtimeWebSocketService(
-	// 	c.Logger,
-	// 	c.RealtimeTranscriberService,
-	// 	c.OpenAITextGenerationService,
-	// )
-
-	processor := NewFileWebSocketService(
+	processor := NewRealtimeWebSocketService(
 		c.Logger,
-		c.AudioService,
+		c.RealtimeTranscriberService,
 		c.OpenAITextGenerationService,
 	)
+
+	// processor := NewFileWebSocketService(
+	// 	c.Logger,
+	// 	c.AudioService,
+	// 	c.OpenAITextGenerationService,
+	// )
 
 	return &Server{
 		config: c.Config,
@@ -226,8 +226,8 @@ func (s *Server) initSession(userID uint64, conn *websocket.Conn, wsConnectAudio
 		subscriptionValid: false, // По умолчанию считаем подписку недействительной
 		Mutex:             sync.Mutex{},
 		AudioOptions: WSSessionAudioOptions{
-			Format:     wsConnectAudioDTO.Format,
-			SampleRate: wsConnectAudioDTO.SampleRate,
+			SampleFormat: wsConnectAudioDTO.Format,
+			SampleRate:   wsConnectAudioDTO.SampleRate,
 		},
 	}
 
@@ -318,7 +318,7 @@ func (s *Server) handleAudioMessage(session *WSSession, message WebSocketMessage
 		// Инициализируем сессию
 		err := s.processor.StartSession(session.ID, &interfaces.ProcessorSessionOptions{
 			UserID:     session.UserID,
-			Format:     session.AudioOptions.Format,
+			Format:     session.AudioOptions.SampleFormat,
 			SampleRate: session.AudioOptions.SampleRate,
 			Callback: func(text string) {
 				s.sendPartialMessage(session, text)

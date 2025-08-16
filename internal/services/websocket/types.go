@@ -66,6 +66,6 @@ type WSSession struct {
 }
 
 type WSSessionAudioOptions struct {
-	Format     string
-	SampleRate uint32
+	SampleFormat string // pcm16, i16, i8, f32, i24
+	SampleRate   uint32 // 16000, 48000
 }
