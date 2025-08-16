@@ -158,7 +158,9 @@ const (
 type ItemStatus int
 
 const (
-	ItemCommitted ItemStatus = iota
+	ItemSpeechStarted ItemStatus = iota
+	ItemSpeechStopped
+	ItemCommitted
 	ItemCompleted
 )
 
@@ -168,6 +170,13 @@ type ConversationItem struct {
 	PreviousItemID string     // ID предыдущего элемента (для определения порядка)
 	Status         ItemStatus // Статус: committed или completed
 	Transcript     string     // Текст транскрипции (заполняется при completed)
+}
+
+// ConversationItemUpdate описывает опции для обновления элемента разговора
+type ConversationItemUpdate struct {
+	PreviousItemID *string    // Указатель на previous_item_id (nil = не обновлять)
+	Status         ItemStatus // Указатель на статус (nil = не обновлять)
+	Transcript     *string    // Указатель на транскрипцию (nil = не обновлять)
 }
 
 // RealtimeSession представляет сессию транскрипции с собственным подключением к OpenAI

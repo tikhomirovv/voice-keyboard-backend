@@ -139,7 +139,7 @@ func (s *RealtimeSession) initTranscriptionSession() error {
 				// Eagerness: "low",
 				// Threshold:         0.5,
 				PrefixPaddingMS:   200,
-				SilenceDurationMS: 200,
+				SilenceDurationMS: 500,
 			},
 			// TurnDetection: nil,
 			InputAudioNoiseReduction: &NoiseReduction{
@@ -218,18 +218,30 @@ func (s *RealtimeSession) handleTranscriptionDelta(event *RealtimeEvent) {
 	// s.logger.Debug(fmt.Sprintf("Session %s: Delta transcript: %s", s.ID, event.Delta))
 }
 
-func (s *RealtimeSession) handleAudioBufferSpeechStarted(_ *RealtimeEvent) {
-	s.logger.Debug(fmt.Sprintf("Session %s: Audio buffer speech started", s.ID))
+func (s *RealtimeSession) handleAudioBufferSpeechStarted(event *RealtimeEvent) {
+	s.logger.Debug("Session %s: Audio buffer speech started, item_id=%s", s.ID, event.ItemID)
+
+	// Добавляем элемент в карту разговора при начале речи
+	// Используем пустой previous_item_id, так как это начало новой речи
+	s.UpdateOrCreateConversationItem(event.ItemID, ConversationItemUpdate{
+		Status: ItemSpeechStarted,
+	})
 }
 
-func (s *RealtimeSession) handleAudioBufferSpeechStopped(_ *RealtimeEvent) {
-	s.logger.Debug(fmt.Sprintf("Session %s: Audio buffer speech stopped", s.ID))
+func (s *RealtimeSession) handleAudioBufferSpeechStopped(event *RealtimeEvent) {
+	s.logger.Debug(fmt.Sprintf("Session %s: Audio buffer speech stopped, item_id=%s", s.ID, event.ItemID))
+	s.UpdateOrCreateConversationItem(event.ItemID, ConversationItemUpdate{
+		Status: ItemSpeechStopped,
+	})
 }
 
 // handleTranscriptionCompleted обрабатывает завершенные результаты транскрипции
 func (s *RealtimeSession) handleTranscriptionCompleted(event *RealtimeEvent) {
 	// Обновляем элемент в карте разговора
-	s.UpdateConversationItem(event.ItemID, ItemCompleted, event.Transcript)
+	s.UpdateOrCreateConversationItem(event.ItemID, ConversationItemUpdate{
+		Status:     ItemCompleted, // Устанавливаем статус Completed
+		Transcript: &event.Transcript,
+	})
 
 	// Отправляем результат в канал
 	result := &dto.TranscriberResult{
@@ -249,8 +261,11 @@ func (s *RealtimeSession) handleAudioBufferCommitted(event *RealtimeEvent) {
 	s.logger.Debug(fmt.Sprintf("Session %s: Audio buffer committed: item_id=%s, previous_item_id=%s",
 		s.ID, event.ItemID, event.PreviousItemID))
 
-	// Добавляем элемент в карту разговора
-	s.AddConversationItem(event.ItemID, event.PreviousItemID, ItemCommitted)
+	// Обновляем элемент в карте разговора с previous_item_id
+	s.UpdateOrCreateConversationItem(event.ItemID, ConversationItemUpdate{
+		PreviousItemID: &event.PreviousItemID,
+		Status:         ItemCommitted, // Устанавливаем статус Committed
+	})
 
 	// Отправляем сигнал о получении committed события, если ждем коммит
 	if s.IsWaitingCommit() {
@@ -266,7 +281,6 @@ func (s *RealtimeSession) handleAudioBufferCommitted(event *RealtimeEvent) {
 // handleError обрабатывает события ошибок от Realtime API
 func (s *RealtimeSession) handleError(event *RealtimeEvent) {
 	if event.Error != nil {
-		s.logger.Error(fmt.Sprintf("Session %s: Received error from Realtime API: %+v", s.ID, event.Error))
 		// При ошибке коммита пустого буфера отправляем сигнал, если ждем коммит
 		if event.Error.Code == "input_audio_buffer_commit_empty" && s.IsWaitingCommit() {
 			select {
@@ -275,6 +289,8 @@ func (s *RealtimeSession) handleError(event *RealtimeEvent) {
 			default:
 				// Неблокирующая отправка - если никто не ждет, просто игнорируем
 			}
+		} else {
+			s.logger.Error(fmt.Sprintf("Session %s: Received error from Realtime API: %+v", s.ID, event.Error))
 		}
 	}
 }
@@ -362,28 +378,39 @@ func (s *RealtimeSession) SetWaitingCommit(waiting bool) {
 	s.waitingCommit = waiting
 }
 
-// AddConversationItem добавляет новый элемент разговора
-func (s *RealtimeSession) AddConversationItem(itemID string, previousItemID string, status ItemStatus) {
-	s.itemsMutex.Lock()
-	defer s.itemsMutex.Unlock()
-
-	s.conversationItems[itemID] = &ConversationItem{
-		ItemID:         itemID,
-		PreviousItemID: previousItemID,
-		Status:         status,
-	}
-}
-
-// UpdateConversationItem обновляет статус элемента разговора
-func (s *RealtimeSession) UpdateConversationItem(itemID string, status ItemStatus, transcript string) {
+// UpdateOrCreateConversationItem универсальный метод для обновления или создания элемента разговора
+func (s *RealtimeSession) UpdateOrCreateConversationItem(itemID string, update ConversationItemUpdate) {
+	s.logger.Debug(fmt.Sprintf("Session %s: Updating or creating conversation item, item_id=%s, update=%+v", s.ID, itemID, update))
 	s.itemsMutex.Lock()
 	defer s.itemsMutex.Unlock()
 
 	if item, exists := s.conversationItems[itemID]; exists {
-		item.Status = status
-		if transcript != "" {
-			item.Transcript = transcript
+		item.Status = update.Status
+
+		if update.PreviousItemID != nil {
+			item.PreviousItemID = *update.PreviousItemID
 		}
+
+		if update.Transcript != nil {
+			item.Transcript = *update.Transcript
+		}
+	} else {
+		// Создаем новый элемент
+		item := &ConversationItem{
+			ItemID: itemID,
+			Status: update.Status,
+		}
+
+		// Устанавливаем значения из опций
+		if update.PreviousItemID != nil {
+			item.PreviousItemID = *update.PreviousItemID
+		}
+
+		if update.Transcript != nil {
+			item.Transcript = *update.Transcript
+		}
+
+		s.conversationItems[itemID] = item
 	}
 }
 
@@ -473,7 +500,7 @@ func (s *RealtimeSession) GetPendingItemIDs() []string {
 
 	var pending []string
 	for itemID, item := range s.conversationItems {
-		if item.Status == ItemCommitted {
+		if item.Status != ItemCompleted {
 			pending = append(pending, itemID)
 		}
 	}
