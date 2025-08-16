@@ -68,14 +68,29 @@ type ResponseRequest struct {
 	// Input - входные данные для запроса
 	Input string `json:"input" validate:"required"`
 
-	// Temperature - параметр случайности (0.0-2.0)
-	Temperature float32 `json:"temperature,omitempty" validate:"omitempty,min=0,max=2"`
-
 	// MaxOutputTokens - максимальное количество токенов в ответе
 	MaxOutputTokens int `json:"max_output_tokens,omitempty"`
+}
 
-	// TopP - параметр вероятности следующего токена (0.0-1.0)
-	TopP float32 `json:"top_p,omitempty" validate:"omitempty,min=0,max=1"`
+type ResponseRequestWithoutReasoning struct {
+	ResponseRequest
+	Temperature float32 `json:"temperature,omitempty" validate:"omitempty,min=0,max=2"`
+	// TopP        float32 `json:"top_p,omitempty" validate:"omitempty,min=0,max=1"`
+}
+
+type ResponseRequestWithReasoning struct {
+	ResponseRequest
+	Reasoning RequestReasoningFields `json:"reasoning,omitempty"`
+}
+
+type RequestReasoningFields struct {
+	// Effort - ограничивает усилия на рассуждения для моделей с рассуждениями
+	// Поддерживаемые значения: minimal, low, medium, high
+	// Уменьшение усилий может привести к более быстрым ответам и меньшему количеству токенов
+	Effort string `json:"effort,omitempty" validate:"omitempty,oneof=minimal low medium high"`
+	// Summary - краткое изложение рассуждений, выполненных моделью
+	// Полезно для отладки и понимания процесса рассуждений модели
+	Summary string `json:"summary,omitempty" validate:"omitempty,oneof=auto concise detailed"`
 }
 
 // OutputContent представляет содержимое ответа
@@ -198,8 +213,6 @@ type RealtimeSession struct {
 	closed    bool            // Флаг закрытия
 	closeCh   chan struct{}   // Канал для сигнала закрытия
 	connMutex sync.Mutex      // Мьютекс для соединения
-	itemID    string          // Текущий ID элемента в разговоре
-	lastText  string          // Последний полученный текст
 	ready     bool            // Флаг готовности сессии
 
 	// Флаг активности речи и мьютекс для его защиты

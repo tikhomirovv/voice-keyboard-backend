@@ -59,6 +59,7 @@ connecte:
 
 openai:
   api_key: openai-key
+  model: gpt-4.1-nano # Название модели OpenAI для генерации текста
 
 releases:
   path: ./releases

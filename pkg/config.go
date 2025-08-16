@@ -99,6 +99,7 @@ type ConnecteConfig struct {
 
 type OpenAIConfig struct {
 	APIKey string `mapstructure:"api_key"`
+	Model  string `mapstructure:"model"` // Название модели OpenAI для генерации текста
 }
 
 type ReleasesConfig struct {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"gitlab.com/voice-keyboard/backend-go/pkg"
@@ -24,8 +25,15 @@ const (
 	responsesURL = openAIBaseURL + "/responses"
 
 	// Таймаут для запросов к API OpenAI
-	apiRequestTimeout = 30 * time.Second
+	apiRequestTimeout = 15 * time.Second
 )
+
+// isReasoningModel определяет, является ли модель reasoning-моделью
+// Reasoning модели - это модели, которые содержат "gpt-5" в названии
+func isReasoningModel(modelName string) bool {
+	// Все модели, содержащие "gpt-5" в названии, считаются reasoning моделями
+	return strings.Contains(strings.ToLower(modelName), "gpt-5")
+}
 
 // TextGenerationClient представляет клиент для работы с OpenAI API
 type TextGenerationClient struct {
@@ -103,12 +111,32 @@ func (c *TextGenerationClient) CreateChatCompletion(
 }
 
 // CreateResponse отправляет запрос к Responses API
+// Автоматически определяет тип модели и использует соответствующие параметры
 func (c *TextGenerationClient) CreateResponse(
 	ctx context.Context,
 	request *ResponseRequest,
 ) (*ResponseResult, error) {
+	// Создаем правильную структуру в зависимости от типа модели
+	var requestBody any
+
+	if isReasoningModel(request.Model) {
+		// Для reasoning-моделей
+		requestBody = &ResponseRequestWithReasoning{
+			ResponseRequest: *request,
+			Reasoning: RequestReasoningFields{
+				Effort: "minimal",
+			},
+		}
+	} else {
+		// Для обычных моделей
+		requestBody = &ResponseRequestWithoutReasoning{
+			ResponseRequest: *request,
+			Temperature:     0.1,
+		}
+	}
+
 	// Подготовка запроса
-	reqBody, err := json.Marshal(request)
+	reqBody, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -162,6 +190,7 @@ func (c *TextGenerationClient) CreateResponse(
 // OpenAITextGenerationService реализует интерфейс OpenAITextGenerationServiceInterface
 type OpenAITextGenerationService struct {
 	client *TextGenerationClient
+	config *pkg.Config
 	logger logger.Logger
 }
 
@@ -174,6 +203,7 @@ func NewOpenAITextGenerationService(
 
 	return &OpenAITextGenerationService{
 		client: client,
+		config: config,
 		logger: logger,
 	}
 }
@@ -184,7 +214,12 @@ func (s *OpenAITextGenerationService) GenerateText(
 	request *TextGenerationRequest,
 ) (*TextGenerationResponse, error) {
 	if request.Model == "" {
-		request.Model = "gpt-4.1" // Модель по умолчанию
+		// Используем модель из конфигурации или модель по умолчанию
+		if s.config.OpenAI.Model != "" {
+			request.Model = s.config.OpenAI.Model
+		} else {
+			request.Model = "gpt-4.1-nano" // Модель по умолчанию
+		}
 	}
 
 	s.logger.Debug("Generating text with OpenAI",
@@ -205,37 +240,46 @@ func (s *OpenAITextGenerationService) GenerateText(
 }
 
 // GenerateResponse генерирует текст на основе инструкций и входных данных через Responses API
+// Автоматически определяет тип модели (reasoning или обычная) и использует соответствующую структуру
 func (s *OpenAITextGenerationService) GenerateResponse(
 	ctx context.Context,
 	request *ResponseRequest,
 ) (*ResponseResult, error) {
 	if request.Model == "" {
-		request.Model = "gpt-4.1" // Модель по умолчанию
+		// Используем модель из конфигурации или модель по умолчанию
+		if s.config.OpenAI.Model != "" {
+			request.Model = s.config.OpenAI.Model
+		} else {
+			request.Model = "gpt-4.1-nano" // Модель по умолчанию
+		}
 	}
 
 	s.logger.Debug("Generating response with OpenAI Responses API",
 		"model", request.Model,
-		"input", request.Input)
+		"input", request.Input,
+		"isReasoningModel", isReasoningModel(request.Model))
 
 	response, err := s.client.CreateResponse(ctx, request)
 	if err != nil {
 		s.logger.Error("Failed to generate response with OpenAI", "error", err)
 		return nil, fmt.Errorf("response generation failed: %w", err)
 	}
-
 	// Извлекаем текст из ответа для логирования
-	var outputText string
-	if len(response.Output) > 0 && len(response.Output[0].Content) > 0 {
-		outputText = response.Output[0].Content[0].Text
-		if len(outputText) > 50 {
-			outputText = outputText[:50] + "..." // Обрезаем для логов
+	extractedText := s.ExtractTextFromResponse(response)
+	var outputPreview string
+	if extractedText != "" {
+		if len(extractedText) > 100 {
+			outputPreview = extractedText[:100] + "..." // Обрезаем для логов
+		} else {
+			outputPreview = extractedText
 		}
 	}
 
 	s.logger.Debug("Successfully generated response with OpenAI",
 		"model", response.Model,
 		"responseId", response.ID,
-		"outputPreview", outputText)
+		"outputItemsCount", len(response.Output),
+		"extractedText", outputPreview)
 
 	return response, nil
 }
@@ -252,23 +296,36 @@ func (s *OpenAITextGenerationService) ExtractTextFromResponse(response *Response
 		return ""
 	}
 
-	// Получаем первое сообщение
-	message := response.Output[0]
-
-	// Проверяем наличие содержимого в сообщении
-	if len(message.Content) == 0 {
-		return ""
-	}
-
-	// Ищем содержимое типа output_text
-	for _, content := range message.Content {
-		if content.Type == "output_text" {
-			return content.Text
+	// Ищем сообщение с типом "message" (не "reasoning")
+	for _, outputMessage := range response.Output {
+		if outputMessage.Type == "message" && len(outputMessage.Content) > 0 {
+			// Ищем содержимое типа output_text
+			for _, content := range outputMessage.Content {
+				if content.Type == "output_text" {
+					return content.Text
+				}
+			}
+			// Если не нашли output_text, возвращаем текст из первого содержимого
+			if outputMessage.Content[0].Text != "" {
+				return outputMessage.Content[0].Text
+			}
 		}
 	}
 
-	// Возвращаем текст из первого содержимого, если не нашли output_text
-	return message.Content[0].Text
+	// Если не нашли message, попробуем взять из первого элемента (fallback для совместимости)
+	message := response.Output[0]
+	if len(message.Content) > 0 {
+		for _, content := range message.Content {
+			if content.Type == "output_text" {
+				return content.Text
+			}
+		}
+		if message.Content[0].Text != "" {
+			return message.Content[0].Text
+		}
+	}
+
+	return ""
 }
 
 // FixText исправляет текст на основе LLM
@@ -279,10 +336,15 @@ func (s *OpenAITextGenerationService) FixText(ctx context.Context, text string) 
 
 	prompt := fmt.Sprintf("Please correct all spelling, grammar, and punctuation in the following transcribed text. Add spaces, split sentences, and create new paragraphs where appropriate for better readability. Do not add, remove, or change any information. Do not paraphrase or interpret. Only return the corrected, well-formatted text. Text: `%s`", text)
 
+	// Используем модель из конфигурации или модель по умолчанию
+	model := s.config.OpenAI.Model
+	if model == "" {
+		model = "gpt-4.1-nano" // Модель по умолчанию
+	}
+
 	request := &ResponseRequest{
-		Model:       "gpt-4.1-nano",
-		Input:       prompt,
-		Temperature: 0.1,
+		Model: model,
+		Input: prompt,
 	}
 
 	response, err := s.GenerateResponse(ctx, request)
