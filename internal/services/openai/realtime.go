@@ -138,8 +138,8 @@ func (s *RealtimeSession) initTranscriptionSession() error {
 				// Type:      "semantic_vad",
 				// Eagerness: "low",
 				// Threshold:         0.5,
-				PrefixPaddingMS:   300,
-				SilenceDurationMS: 1000,
+				PrefixPaddingMS:   200,
+				SilenceDurationMS: 200,
 			},
 			// TurnDetection: nil,
 			InputAudioNoiseReduction: &NoiseReduction{
@@ -215,9 +215,7 @@ func (s *RealtimeSession) handleMessages() {
 
 // handleTranscriptionDelta обрабатывает промежуточные результаты транскрипции
 func (s *RealtimeSession) handleTranscriptionDelta(event *RealtimeEvent) {
-	// Обновляем последний текст
-	// s.lastText += event.Delta
-	s.logger.Debug(fmt.Sprintf("Session %s: Delta transcript: %s", s.ID, event.Delta))
+	// s.logger.Debug(fmt.Sprintf("Session %s: Delta transcript: %s", s.ID, event.Delta))
 }
 
 func (s *RealtimeSession) handleAudioBufferSpeechStarted(_ *RealtimeEvent) {
@@ -267,14 +265,16 @@ func (s *RealtimeSession) handleAudioBufferCommitted(event *RealtimeEvent) {
 
 // handleError обрабатывает события ошибок от Realtime API
 func (s *RealtimeSession) handleError(event *RealtimeEvent) {
-	s.logger.Error(fmt.Sprintf("Session %s: Received error from Realtime API: %+v", s.ID, event.Error))
-
 	if event.Error != nil {
 		s.logger.Error(fmt.Sprintf("Session %s: Received error from Realtime API: %+v", s.ID, event.Error))
-
-		// Логируем ошибку коммита пустого буфера
-		if event.Error.Code == "input_audio_buffer_commit_empty" {
-			s.logger.Debug(fmt.Sprintf("Session %s: Received commit error for empty buffer", s.ID))
+		// При ошибке коммита пустого буфера отправляем сигнал, если ждем коммит
+		if event.Error.Code == "input_audio_buffer_commit_empty" && s.IsWaitingCommit() {
+			select {
+			case s.commitCh <- struct{}{}:
+				s.logger.Debug(fmt.Sprintf("Session %s: Sent commit error signal for empty buffer", s.ID))
+			default:
+				// Неблокирующая отправка - если никто не ждет, просто игнорируем
+			}
 		}
 	}
 }
