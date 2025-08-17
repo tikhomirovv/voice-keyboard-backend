@@ -1,0 +1,70 @@
+include:
+  - local: .gitlab-ci.common.yml
+
+variables:
+  PROJECT: voice-keyboard/backend-go
+  REGISTRY: $REGISTRY_HOST/$PROJECT
+  IMAGE_NAME: $REGISTRY/app
+
+stages:
+  - build
+  - deploy
+
+app:
+  stage: build
+  extends:
+    - .job-build
+  script:
+    - !reference [.job-build, script]
+  when: manual
+
+# Шаблон для деплоя
+.deploy:
+  stage: deploy
+  needs:
+    - app
+  variables:
+    SSH_USER: !reference [.ssh-auth, variables, SSH_USER]
+    NETWORK_NAME: voice-key-prod
+    CONTAINER_NAME: voice-key-app
+    CONFIG_FILE: /var/config/voice-key/config.yml
+  before_script:
+    - !reference [.ssh-auth, before_script]
+  script:
+    - echo "Deploying application to $IP"
+
+    # Копирование конфигурационных файлов
+    - echo "$CONFIG_VARIABLES" | base64 -d > config.yml && scp config.yml $SSH_USER@$IP:"$CONFIG_FILE" && rm config.yml
+
+    # Логин в реестр GitLab
+    - ssh $SSH_USER@$IP "docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY"
+
+    # Запуск контейнера
+    - ssh $SSH_USER@$IP "
+      docker pull $IMAGE_NAME:$TAG &&
+      docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || true &&
+      docker run -d
+      --restart=always
+      --name=$CONTAINER_NAME
+      --network=$NETWORK_NAME
+      -v $CONFIG_FILE:/app/config.yml:ro
+      -v /var/voice-key/releases:/app/releases
+      $IMAGE_NAME:$TAG
+      "
+
+    # Выполнение миграций
+    - ssh $SSH_USER@$IP "docker exec $CONTAINER_NAME /app/voice-key database:migrations:migrate"
+  allow_failure: false
+
+production:
+  environment:
+    name: production
+    url: https://voice-key.example.com
+  variables:
+    CONFIG_VARIABLES: "$CONFIG_PRODUCTION"
+    IP: "$IP_PRODUCTION"
+    SSH_PRIVATE_KEY: "$SSH_PK_PRODUCTION"
+  extends: .deploy
+  when: manual
+  only:
+    - tags

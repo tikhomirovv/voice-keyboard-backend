@@ -1,0 +1,79 @@
+# COMMON PATTERNS FOR VOICE-KEY PROJECT
+variables:
+  REGISTRY_HOST: registry.gitlab.com
+
+# Use docker-image
+.docker-image:
+  image: docker:20.10.14-alpine3.15
+  services:
+    - docker:20.10.14-dind
+
+# Auth in GitLab registry
+.docker-login:
+  before_script:
+    - docker login -u $OPS_DEPLOY_USER -p $OPS_DEPLOY_TOKEN registry.gitlab.com
+
+# SSH auth
+# Required: $IP, $SSH_PRIVATE_KEY
+.ssh-auth:
+  variables:
+    SSH_USER: $OPS_DEPLOY_USER
+  before_script:
+    - which ssh-agent || ( apk add --update openssh-client ) && eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan $IP >> ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+
+# To extends build app job
+# Required: $IMAGE_NAME
+.job-build:
+  extends:
+    - .docker-image
+  variables:
+    DOCKERFILE: Dockerfile
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+    # Основной тег изображения
+    - COMMIT_TAG="$CI_COMMIT_SHORT_SHA"
+
+    # Проверить, есть ли уже такое изображение и записать в IMAGE_EXISTS
+    - IMAGE_EXISTS=$(docker manifest inspect $IMAGE_NAME:$COMMIT_TAG || echo "0")
+
+    # Если это релизный тег (тег в гите) - сделаем дополнительный тег к изображению
+    - RELEASE_TAG=$(if [ "$CI_COMMIT_TAG" == "" ]; then echo ""; else echo "$CI_COMMIT_TAG"; fi);
+
+    # Будем релизить (пробрасывать в следующую job-у) в зависимости от наличия релизного тега
+    - DEPLOY_TAG=$(if [ "$RELEASE_TAG" == "" ]; then echo "$COMMIT_TAG"; else echo "$RELEASE_TAG"; fi);
+
+    - echo "TAG=$DEPLOY_TAG" >> build.env
+
+  script:
+    - >
+      if [ "$IMAGE_EXISTS" == "0" ]; then
+        echo "Building image - $IMAGE_NAME:$COMMIT_TAG"
+        docker build -t $IMAGE_NAME:$COMMIT_TAG -f $DOCKERFILE . && docker push $IMAGE_NAME:$COMMIT_TAG
+        HAVE_IMAGE=1
+      else
+        echo "Image is exists - $IMAGE_NAME:$COMMIT_TAG"
+        HAVE_IMAGE=0
+      fi
+
+    - >
+      if [ "$RELEASE_TAG" != "" ]; then
+        IMAGE_RELEASE_EXISTS=$(docker manifest inspect $IMAGE_NAME:$RELEASE_TAG || echo "0")
+
+        if [ "$IMAGE_RELEASE_EXISTS" != "0" ]; then
+          echo "Release image is exists - $IMAGE_NAME:$RELEASE_TAG"
+        else
+          if [ "$HAVE_IMAGE" == "0" ]; then
+            docker pull $IMAGE_NAME:$COMMIT_TAG
+          fi
+          echo "Creating release tag - $IMAGE_NAME:$RELEASE_TAG"
+          docker tag $IMAGE_NAME:$COMMIT_TAG $IMAGE_NAME:$RELEASE_TAG
+          docker push $IMAGE_NAME:$RELEASE_TAG
+        fi
+      fi
+  artifacts:
+    reports:
+      dotenv: build.env

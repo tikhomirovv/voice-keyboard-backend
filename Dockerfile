@@ -41,7 +41,7 @@ USER 65532:65532
 WORKDIR /app
 
 # Expose ports
-EXPOSE 8080 8081
+EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
