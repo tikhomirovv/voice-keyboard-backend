@@ -35,7 +35,7 @@ app:
     - echo "Deploying application to $IP"
 
     # Копирование конфигурационных файлов
-    - echo "$CONFIG_VARIABLES" | base64 -d > config.yml && scp config.yml $SSH_USER@$IP:"$CONFIG_FILE" && rm config.yml
+    # - echo "$CONFIG_VARIABLES" | base64 -d > config.yml && scp config.yml $SSH_USER@$IP:"$CONFIG_FILE" && rm config.yml
 
     # Логин в реестр GitLab
     - ssh $SSH_USER@$IP "docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY"
@@ -62,9 +62,8 @@ production:
     name: production
     url: https://voice-key.example.com
   variables:
-    CONFIG_VARIABLES: "$CONFIG_PRODUCTION"
-    IP: "$IP_PRODUCTION"
-    SSH_PRIVATE_KEY: "$SSH_PK_PRODUCTION"
+    IP: "$IP_VDSINA"
+    SSH_PRIVATE_KEY: "$SSH_PK_VDSINA"
   extends: .deploy
   when: manual
   # only:
