@@ -2,7 +2,7 @@ include:
   - local: .gitlab-ci.common.yml
 
 variables:
-  PROJECT: voice-keyboard/backend-go
+  PROJECT: voice-keyboard/backend
   REGISTRY: $REGISTRY_HOST/$PROJECT
   IMAGE_NAME: $REGISTRY/app
 
