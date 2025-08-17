@@ -45,12 +45,14 @@ desktop_app:
 
 websocket:
   enabled: true
-  port: 8080  # Теперь WebSocket работает на том же порту что и HTTP API
-  path: /ws/audio
   max_connections_per_user: 5
   max_session_duration: 600 # seconds
   idle_timeout: 300 # seconds
   connection_timeout: 30 # seconds
+
+basic_auth:
+  username: admin
+  password: admin123
 
 openai:
   api_key: openai-key

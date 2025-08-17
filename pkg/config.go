@@ -21,6 +21,7 @@ type Config struct {
 	WebSocket  WebSocketConfig  `mapstructure:"websocket"`
 	OpenAI     OpenAIConfig     `mapstructure:"openai"`
 	Releases   ReleasesConfig   `mapstructure:"releases"`
+	BasicAuth  BasicAuthConfig  `mapstructure:"basic_auth"`
 }
 
 type AppConfig struct {
@@ -82,14 +83,16 @@ type DesktopAppConfig struct {
 }
 
 type WebSocketConfig struct {
-	Enabled bool `mapstructure:"enabled"`
-	// TODO: remove port and path
-	Port                  uint   `mapstructure:"port"`
-	Path                  string `mapstructure:"path"`
-	MaxConnectionsPerUser int    `mapstructure:"max_connections_per_user"`
-	MaxSessionDuration    int    `mapstructure:"max_session_duration"`
-	IdleTimeout           int    `mapstructure:"idle_timeout"`
-	ConnectionTimeout     int    `mapstructure:"connection_timeout"`
+	Enabled               bool `mapstructure:"enabled"`
+	MaxConnectionsPerUser int  `mapstructure:"max_connections_per_user"`
+	MaxSessionDuration    int  `mapstructure:"max_session_duration"`
+	IdleTimeout           int  `mapstructure:"idle_timeout"`
+	ConnectionTimeout     int  `mapstructure:"connection_timeout"`
+}
+
+type BasicAuthConfig struct {
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
 }
 
 type OpenAIConfig struct {
@@ -142,10 +145,6 @@ func (c *Config) BuildSiteUrl(path string, queryParams map[string]string) (strin
 	}
 	u.RawQuery = query.Encode()
 	return u.String(), nil
-}
-
-func (c *Config) GetWebSocketPort() string {
-	return fmt.Sprintf(":%d", c.WebSocket.Port)
 }
 
 func NewConfig(configPath string) (*Config, error) {

@@ -1,5 +1,3 @@
-version: "3.8"
-
 name: voice-key-backend-go-prod
 
 services:

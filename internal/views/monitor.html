@@ -1,0 +1,204 @@
+{{template "base" .}} {{define "title"}}WebSocket Monitor{{end}} {{define
+"styles"}}
+<style>
+  table {
+    @apply w-full border-collapse min-w-full mb-6;
+  }
+  th,
+  td {
+    @apply border border-gray-300 px-4 py-2 text-left;
+  }
+  th {
+    @apply bg-gray-100 font-semibold;
+  }
+  .stats span {
+    @apply font-semibold mr-6;
+  }
+  .empty-row {
+    @apply text-center text-gray-500;
+  }
+</style>
+{{end}} {{define "content"}}
+<div class="max-w-screen-xl">
+  <h1 class="text-2xl font-bold mb-6">WebSocket Sessions Monitor</h1>
+
+  <div class="flex items-center gap-8 mb-6 text-gray-800">
+    <span
+      >Active Sessions:
+      <span id="sessions-count" class="text-blue-600 font-semibold"
+        >0</span
+      ></span
+    >
+    <span
+      >Active Users:
+      <span id="users-count" class="text-blue-600 font-semibold">0</span></span
+    >
+  </div>
+
+  <div class="mb-6 flex items-center gap-4">
+    <button
+      onclick="fetchData()"
+      class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow"
+    >
+      Refresh Now
+    </button>
+    <label class="inline-flex items-center gap-2 text-gray-800">
+      <input type="checkbox" id="auto-refresh" checked class="h-4 w-4" />
+      <span>Auto-refresh every</span>
+      <select
+        id="refresh-interval"
+        class="border border-gray-300 rounded px-2 py-1"
+      >
+        <option value="2000">2 seconds</option>
+        <option value="5000" selected>5 seconds</option>
+        <option value="10000">10 seconds</option>
+        <option value="30000">30 seconds</option>
+      </select>
+    </label>
+  </div>
+
+  <div
+    class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden"
+  >
+    <div class="px-4 py-3 border-b border-gray-200 bg-gray-50 font-semibold">
+      Active Sessions
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full table-fixed border-collapse">
+        <thead class="bg-gray-50">
+          <tr>
+            <th
+              class="border-b border-gray-200 px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-[220px]"
+            >
+              Session ID
+            </th>
+            <th
+              class="border-b border-gray-200 px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-28"
+            >
+              User ID
+            </th>
+            <th
+              class="border-b border-gray-200 px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-28"
+            >
+              Status
+            </th>
+            <th
+              class="border-b border-gray-200 px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-28"
+            >
+              Format
+            </th>
+            <th
+              class="border-b border-gray-200 px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-32"
+            >
+              Sample Rate
+            </th>
+            <th
+              class="border-b border-gray-200 px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-56"
+            >
+              Start Time
+            </th>
+            <th
+              class="border-b border-gray-200 px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-56"
+            >
+              Last Activity
+            </th>
+          </tr>
+        </thead>
+        <tbody
+          id="sessions-table"
+          class="divide-y divide-gray-200 text-sm"
+        ></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="text-sm text-gray-500 mt-6">
+    Last updated: <span id="last-update">Never</span>
+  </div>
+</div>
+{{end}} {{define "scripts"}}
+<script>
+  let refreshInterval;
+  const autoRefreshCheckbox = document.getElementById("auto-refresh");
+  const refreshIntervalSelect = document.getElementById("refresh-interval");
+
+  function formatDateTime(dateStr) {
+    const date = new Date(dateStr);
+    return date.toLocaleString();
+  }
+
+  async function fetchData() {
+    try {
+      const response = await fetch("./monitor/data");
+      if (!response.ok) {
+        console.error("Failed to fetch data:", response.status);
+        return;
+      }
+
+      const data = await response.json();
+      document.getElementById("sessions-count").textContent =
+        data.active_sessions;
+      document.getElementById("users-count").textContent = data.active_users;
+      document.getElementById("last-update").textContent =
+        new Date().toLocaleString();
+
+      const tbody = document.getElementById("sessions-table");
+      tbody.innerHTML = "";
+
+      const sessions = data.sessions;
+      const sessionIds = Object.keys(sessions);
+
+      if (sessionIds.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 7;
+        cell.className = "px-4 py-3 text-center text-gray-500";
+        cell.textContent = "No active sessions";
+        row.appendChild(cell);
+        tbody.appendChild(row);
+      } else {
+        sessionIds.forEach((sessionId) => {
+          const session = sessions[sessionId];
+          const row = document.createElement("tr");
+
+          const cells = [
+            sessionId,
+            session.userID,
+            session.started ? "Active" : "Connecting",
+            session.format || "N/A",
+            session.sampleRate || "N/A",
+            formatDateTime(session.startTime),
+            formatDateTime(session.lastActivityTime),
+          ];
+
+          cells.forEach((cellText) => {
+            const cell = document.createElement("td");
+            cell.className = "px-4 py-3 whitespace-nowrap text-gray-800";
+            cell.textContent = cellText;
+            row.appendChild(cell);
+          });
+
+          tbody.appendChild(row);
+        });
+      }
+    } catch (err) {
+      console.error("Error fetching data:", err);
+    }
+  }
+
+  function updateRefreshInterval() {
+    clearInterval(refreshInterval);
+    if (autoRefreshCheckbox.checked) {
+      const interval = parseInt(refreshIntervalSelect.value);
+      refreshInterval = setInterval(fetchData, interval);
+    }
+  }
+
+  autoRefreshCheckbox.addEventListener("change", updateRefreshInterval);
+  refreshIntervalSelect.addEventListener("change", updateRefreshInterval);
+
+  // Initial fetch
+  fetchData();
+  updateRefreshInterval();
+</script>
+{{end}}
