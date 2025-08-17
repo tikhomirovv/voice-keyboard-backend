@@ -1,4 +1,4 @@
-package websocket
+package transcribe
 
 import (
 	"encoding/json"
@@ -15,27 +15,13 @@ import (
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 )
 
-// FiberWSSession представляет активную сессию WebSocket для Fiber
-type FiberWSSession struct {
-	ID                string
-	UserID            uint64
-	Conn              *websocket.Conn
-	StartTime         time.Time
-	LastActivityTime  time.Time
-	Started           bool
-	subscriptionOnce  sync.Once
-	subscriptionValid bool
-	Mutex             sync.Mutex
-	AudioOptions      WSSessionAudioOptions
-}
-
-// FiberHandler представляет WebSocket обработчик для Fiber
-type FiberHandler struct {
+// TranscribeWSHandler представляет WebSocket обработчик для Fiber
+type TranscribeWSHandler struct {
 	config *pkg.Config
 	logger logger.Logger
 
 	// sessions
-	sessions     map[string]*FiberWSSession
+	sessions     map[string]*WSSession
 	userSessions map[uint64]map[string]bool // UserID -> map[SessionID]bool
 	sessionMutex sync.RWMutex
 
@@ -46,21 +32,21 @@ type FiberHandler struct {
 }
 
 // GetSessionsCount возвращает количество активных сессий
-func (h *FiberHandler) GetSessionsCount() int {
+func (h *TranscribeWSHandler) GetSessionsCount() int {
 	h.sessionMutex.RLock()
 	defer h.sessionMutex.RUnlock()
 	return len(h.sessions)
 }
 
 // GetUsersCount возвращает количество пользователей с активными сессиями
-func (h *FiberHandler) GetUsersCount() int {
+func (h *TranscribeWSHandler) GetUsersCount() int {
 	h.sessionMutex.RLock()
 	defer h.sessionMutex.RUnlock()
 	return len(h.userSessions)
 }
 
 // GetSessionsInfo возвращает информацию о сессиях для мониторинга
-func (h *FiberHandler) GetSessionsInfo() map[string]interface{} {
+func (h *TranscribeWSHandler) GetSessionsInfo() map[string]interface{} {
 	h.sessionMutex.RLock()
 	defer h.sessionMutex.RUnlock()
 
@@ -79,14 +65,14 @@ func (h *FiberHandler) GetSessionsInfo() map[string]interface{} {
 	return info
 }
 
-// NewFiberHandler создает новый WebSocket обработчик для Fiber
-func NewFiberHandler(c *pkg.Container, processor interfaces.WebSocketProcessorInterface) *FiberHandler {
+// NewTranscribeWSHandler создает новый WebSocket обработчик для Fiber
+func NewTranscribeWSHandler(c *pkg.Container, processor interfaces.WebSocketProcessorInterface) *TranscribeWSHandler {
 	// Используем предоставленный процессор для обработки WebSocket сообщений
 
-	return &FiberHandler{
+	return &TranscribeWSHandler{
 		config:       c.Config,
 		logger:       c.Logger,
-		sessions:     make(map[string]*FiberWSSession),
+		sessions:     make(map[string]*WSSession),
 		userSessions: make(map[uint64]map[string]bool),
 		authService:  c.AuthService,
 		processor:    processor,
@@ -97,7 +83,7 @@ func NewFiberHandler(c *pkg.Container, processor interfaces.WebSocketProcessorIn
 // Методы для обработки WebSocket находятся в WebSocketController
 
 // HandleWebSocket обрабатывает WebSocket соединение
-func (h *FiberHandler) HandleWebSocket(c *websocket.Conn) {
+func (h *TranscribeWSHandler) HandleWebSocket(c *websocket.Conn) {
 	// Получаем userID из контекста
 	userID, ok := c.Locals("userID").(uint64)
 	if !ok {
@@ -162,9 +148,9 @@ func (h *FiberHandler) HandleWebSocket(c *websocket.Conn) {
 }
 
 // initSession инициализирует новую WebSocket сессию
-func (h *FiberHandler) initSession(userID uint64, conn *websocket.Conn, wsConnectAudioDTO *dto.WsConnectAudioDTO) (*FiberWSSession, error) {
+func (h *TranscribeWSHandler) initSession(userID uint64, conn *websocket.Conn, wsConnectAudioDTO *dto.WsConnectAudioDTO) (*WSSession, error) {
 	// Создание новой сессии
-	session := &FiberWSSession{
+	session := &WSSession{
 		ID:                wsConnectAudioDTO.SessionID,
 		UserID:            userID,
 		Conn:              conn,
@@ -202,7 +188,7 @@ func (h *FiberHandler) initSession(userID uint64, conn *websocket.Conn, wsConnec
 }
 
 // handleSession обрабатывает все сообщения WebSocket в рамках одной сессии
-func (h *FiberHandler) handleSession(session *FiberWSSession) {
+func (h *TranscribeWSHandler) handleSession(session *WSSession) {
 	defer h.closeSession(session)
 
 	// Устанавливаем начальный таймаут для чтения
@@ -253,7 +239,7 @@ func (h *FiberHandler) handleSession(session *FiberWSSession) {
 }
 
 // checkUserConnectionLimit проверяет, не превышен ли лимит соединений для пользователя
-func (h *FiberHandler) checkUserConnectionLimit(userID uint64) bool {
+func (h *TranscribeWSHandler) checkUserConnectionLimit(userID uint64) bool {
 	h.sessionMutex.RLock()
 	defer h.sessionMutex.RUnlock()
 
@@ -265,20 +251,8 @@ func (h *FiberHandler) checkUserConnectionLimit(userID uint64) bool {
 	return len(sessions) < h.config.WebSocket.MaxConnectionsPerUser
 }
 
-// validateToken проверяет JWT-токен и возвращает ID пользователя
-func (h *FiberHandler) validateToken(tokenString string) (uint64, error) {
-	h.logger.Debug(fmt.Sprintf("Validating token: %s", tokenString))
-	// Используем AuthService для проверки токена
-	userID, err := h.authService.ValidateToken(tokenString)
-	if err != nil {
-		return 0, fmt.Errorf("token validation error: %w", err)
-	}
-
-	return userID, nil
-}
-
 // sendError отправляет ошибку через WebSocket
-func (h *FiberHandler) sendError(conn *websocket.Conn, code, message string) {
+func (h *TranscribeWSHandler) sendError(conn *websocket.Conn, code, message string) {
 	errorData := ErrorData{
 		Code:    code,
 		Message: message,
@@ -297,12 +271,12 @@ func (h *FiberHandler) sendError(conn *websocket.Conn, code, message string) {
 }
 
 // sendError для сессии
-func (h *FiberHandler) sendErrorToSession(session *FiberWSSession, code, message string) {
+func (h *TranscribeWSHandler) sendErrorToSession(session *WSSession, code, message string) {
 	h.sendError(session.Conn, code, message)
 }
 
 // handleAudioMessage обрабатывает сообщение с аудиоданными
-func (h *FiberHandler) handleAudioMessage(session *FiberWSSession, message WebSocketMessage) {
+func (h *TranscribeWSHandler) handleAudioMessage(session *WSSession, message WebSocketMessage) {
 	session.Mutex.Lock()
 
 	// Проверяем, начата ли сессия
@@ -341,7 +315,7 @@ func (h *FiberHandler) handleAudioMessage(session *FiberWSSession, message WebSo
 }
 
 // handleStopMessage обрабатывает сообщение об окончании записи
-func (h *FiberHandler) handleStopMessage(session *FiberWSSession, _ WebSocketMessage) {
+func (h *TranscribeWSHandler) handleStopMessage(session *WSSession, _ WebSocketMessage) {
 	// Блокируем сессию для проверки
 	session.Mutex.Lock()
 
@@ -385,7 +359,7 @@ func (h *FiberHandler) handleStopMessage(session *FiberWSSession, _ WebSocketMes
 }
 
 // sendPartialMessage отправляет частичное сообщение
-func (h *FiberHandler) sendPartialMessage(session *FiberWSSession, text string) {
+func (h *TranscribeWSHandler) sendPartialMessage(session *WSSession, text string) {
 	// Проверяем, что сессия еще активна
 	if !h.isSessionActive(session.ID) {
 		h.logger.Warn(fmt.Sprintf("Attempt to send partial message to closed session: %s", session.ID))
@@ -413,7 +387,7 @@ func (h *FiberHandler) sendPartialMessage(session *FiberWSSession, text string) 
 }
 
 // sendCompletedMessage отправляет завершенное сообщение
-func (h *FiberHandler) sendCompletedMessage(session *FiberWSSession, text string) error {
+func (h *TranscribeWSHandler) sendCompletedMessage(session *WSSession, text string) error {
 	completedData := CompletedData{
 		Text: text,
 	}
@@ -431,7 +405,7 @@ func (h *FiberHandler) sendCompletedMessage(session *FiberWSSession, text string
 }
 
 // isSessionActive проверяет, активна ли сессия (существует ли в списке сессий)
-func (h *FiberHandler) isSessionActive(sessionID string) bool {
+func (h *TranscribeWSHandler) isSessionActive(sessionID string) bool {
 	h.sessionMutex.RLock()
 	defer h.sessionMutex.RUnlock()
 	_, exists := h.sessions[sessionID]
@@ -439,7 +413,7 @@ func (h *FiberHandler) isSessionActive(sessionID string) bool {
 }
 
 // closeSession закрывает сессию и удаляет её из списка активных сессий
-func (h *FiberHandler) closeSession(session *FiberWSSession) {
+func (h *TranscribeWSHandler) closeSession(session *WSSession) {
 	h.sessionMutex.Lock()
 	defer h.sessionMutex.Unlock()
 
@@ -475,7 +449,7 @@ func (h *FiberHandler) closeSession(session *FiberWSSession) {
 }
 
 // gracefulCloseConn корректно закрывает WebSocket соединение в соответствии с протоколом
-func (h *FiberHandler) gracefulCloseConn(conn *websocket.Conn) {
+func (h *TranscribeWSHandler) gracefulCloseConn(conn *websocket.Conn) {
 	// Устанавливаем дедлайн для закрытия соединения
 	deadline := time.Now().Add(GracefulCloseTimeout)
 	if err := conn.SetWriteDeadline(deadline); err != nil {
@@ -509,7 +483,7 @@ func (h *FiberHandler) gracefulCloseConn(conn *websocket.Conn) {
 }
 
 // getUserSubscription проверяет наличие активной подписки у пользователя
-func (h *FiberHandler) getUserSubscription(userID uint64) (*dto.SubscriptionDTO, error) {
+func (h *TranscribeWSHandler) getUserSubscription(userID uint64) (*dto.SubscriptionDTO, error) {
 	h.logger.Debug(fmt.Sprintf("Checking subscription for user: %d", userID))
 	// Имитация задержки при проверке подписки
 	time.Sleep(1000 * time.Millisecond)
@@ -527,7 +501,7 @@ func (h *FiberHandler) getUserSubscription(userID uint64) (*dto.SubscriptionDTO,
 }
 
 // startCheckSubscription запускает асинхронную проверку подписки пользователя
-func (h *FiberHandler) startCheckSubscription(session *FiberWSSession) {
+func (h *TranscribeWSHandler) startCheckSubscription(session *WSSession) {
 	go func() {
 		session.subscriptionOnce.Do(func() {
 			h.logger.Debug(fmt.Sprintf("Checking subscription for user: %d", session.UserID))
@@ -565,7 +539,7 @@ func (h *FiberHandler) startCheckSubscription(session *FiberWSSession) {
 }
 
 // waitForSubscriptionStatus ожидает результат проверки подписки с таймаутом
-func (h *FiberHandler) waitForSubscriptionStatus(session *FiberWSSession) bool {
+func (h *TranscribeWSHandler) waitForSubscriptionStatus(session *WSSession) bool {
 	h.logger.Info(fmt.Sprintf("Checking subscription result for session: %s", session.ID))
 
 	// Ждем завершения проверки подписки с таймаутом

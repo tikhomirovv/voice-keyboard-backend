@@ -1,11 +1,11 @@
-package websocket
+package transcribe
 
 import (
 	"encoding/json"
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/gofiber/websocket/v2"
 )
 
 // MessageType определяет тип сообщения, которое отправляется через WebSocket
@@ -50,17 +50,16 @@ type ErrorData struct {
 	Message string `json:"message"`
 }
 
-// WSSession представляет активную сессию WebSocket
+// WSSession представляет активную сессию WebSocket для Fiber
 type WSSession struct {
-	ID string
-	// WS
+	ID                string
 	UserID            uint64
 	Conn              *websocket.Conn
 	StartTime         time.Time
 	LastActivityTime  time.Time
-	Started           bool      // Флаг, указывающий, была ли сессия начата
-	subscriptionOnce  sync.Once // Гарантирует однократное выполнение проверки подписки
-	subscriptionValid bool      // Результат проверки подписки
+	Started           bool
+	subscriptionOnce  sync.Once
+	subscriptionValid bool
 	Mutex             sync.Mutex
 	AudioOptions      WSSessionAudioOptions
 }

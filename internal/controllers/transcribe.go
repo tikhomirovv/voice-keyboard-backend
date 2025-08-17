@@ -5,9 +5,9 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
-	fiberwsocket "github.com/gofiber/websocket/v2"
+	"github.com/gofiber/websocket/v2"
 	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
-	"gitlab.com/voice-keyboard/backend-go/internal/services/websocket"
+	"gitlab.com/voice-keyboard/backend-go/internal/services/transcribe"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 	"gitlab.com/voice-keyboard/backend-go/pkg/logger"
 )
@@ -20,17 +20,16 @@ const (
 
 // WebSocketController обрабатывает WebSocket соединения
 type WebSocketController struct {
-	logger      logger.Logger
-	validator   *validator.Validate
-	authService interfaces.AuthServiceInterface
-	processor   interfaces.WebSocketProcessorInterface
-	handler     *websocket.FiberHandler
+	logger            logger.Logger
+	validator         *validator.Validate
+	authService       interfaces.AuthServiceInterface
+	transcribeHandler *transcribe.TranscribeWSHandler
 }
 
 // HandleWebSocket обрабатывает WebSocket соединение для аудио
-func (wc *WebSocketController) HandleWebSocket(c *fiberwsocket.Conn) {
-	// Делегируем обработку FiberHandler'у
-	wc.handler.HandleWebSocket(c)
+func (wc *WebSocketController) HandleWebSocket(c *websocket.Conn) {
+	// Делегируем обработку TranscribeWSHandler'у
+	wc.transcribeHandler.HandleWebSocket(c)
 }
 
 // HandleMonitorPage отображает страницу мониторинга WebSocket соединений
@@ -195,9 +194,9 @@ func (wc *WebSocketController) HandleMonitorPage(c *fiber.Ctx) error {
 // HandleMonitorData возвращает данные мониторинга WebSocket соединений
 func (wc *WebSocketController) HandleMonitorData(c *fiber.Ctx) error {
 	data := fiber.Map{
-		"active_sessions": wc.handler.GetSessionsCount(),
-		"active_users":    wc.handler.GetUsersCount(),
-		"sessions":        wc.handler.GetSessionsInfo(),
+		"active_sessions": wc.transcribeHandler.GetSessionsCount(),
+		"active_users":    wc.transcribeHandler.GetUsersCount(),
+		"sessions":        wc.transcribeHandler.GetSessionsInfo(),
 	}
 
 	return c.JSON(data)
@@ -232,7 +231,7 @@ func RegisterWebSocketController(router fiber.Router, container *pkg.Container) 
 	}
 
 	// WebSocket обработчик для аудио
-	wsHandler := fiberwsocket.New(ctrl.HandleWebSocket, fiberwsocket.Config{
+	wsHandler := websocket.New(ctrl.HandleWebSocket, websocket.Config{
 		ReadBufferSize:  WebSocketReadBufferSize,
 		WriteBufferSize: WebSocketWriteBufferSize,
 	})
@@ -246,20 +245,19 @@ func RegisterWebSocketController(router fiber.Router, container *pkg.Container) 
 // NewWebSocketController создает новый экземпляр WebSocketController
 func NewWebSocketController(cnt *pkg.Container) *WebSocketController {
 	// Создаем процессор для обработки WebSocket сообщений
-	processor := websocket.NewRealtimeWebSocketService(
+	processor := transcribe.NewRealtimeWebSocketService(
 		cnt.Logger,
 		cnt.RealtimeTranscriberService,
 		cnt.OpenAITextGenerationService,
 	)
 
 	// Создаем обработчик WebSocket соединений
-	handler := websocket.NewFiberHandler(cnt, processor)
+	transcribeHandler := transcribe.NewTranscribeWSHandler(cnt, processor)
 
 	return &WebSocketController{
-		logger:      cnt.Logger,
-		validator:   cnt.Validator,
-		authService: cnt.AuthService,
-		processor:   processor,
-		handler:     handler,
+		logger:            cnt.Logger,
+		validator:         cnt.Validator,
+		authService:       cnt.AuthService,
+		transcribeHandler: transcribeHandler,
 	}
 }
