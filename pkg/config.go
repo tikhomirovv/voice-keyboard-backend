@@ -82,7 +82,8 @@ type DesktopAppConfig struct {
 }
 
 type WebSocketConfig struct {
-	Enabled               bool   `mapstructure:"enabled"`
+	Enabled bool `mapstructure:"enabled"`
+	// TODO: remove port and path
 	Port                  uint   `mapstructure:"port"`
 	Path                  string `mapstructure:"path"`
 	MaxConnectionsPerUser int    `mapstructure:"max_connections_per_user"`

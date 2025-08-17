@@ -45,7 +45,7 @@ desktop_app:
 
 websocket:
   enabled: true
-  port: 8081
+  port: 8080  # Теперь WebSocket работает на том же порту что и HTTP API
   path: /ws/audio
   max_connections_per_user: 5
   max_session_duration: 600 # seconds

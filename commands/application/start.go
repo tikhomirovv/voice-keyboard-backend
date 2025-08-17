@@ -62,12 +62,15 @@ func NewApplicationStartCommand() *cli.Command {
 			}()
 
 			// Создание и запуск WebSocket-сервера
-			wsApp := websocket.NewServer(container)
-			go func() {
-				if err := wsApp.Start(); err != nil {
-					logger.Error(fmt.Sprintf("Failed to start WebSocket server: %v", err))
-				}
-			}()
+			// wsApp := websocket.NewServer(container)
+			// go func() {
+			//     if err := wsApp.Start(); err != nil {
+			//         logger.Error(fmt.Sprintf("Failed to start WebSocket server: %v", err))
+			//     }
+			// }()
+			// Создание и регистрация WebSocket обработчика для Fiber
+			wsHandler := websocket.NewFiberHandler(container)
+			wsHandler.RegisterRoutes(app)
 
 			logger.Info(fmt.Sprintf(`%s instance "%s" started`, config.App.Name, config.App.Instance))
 
@@ -78,7 +81,7 @@ func NewApplicationStartCommand() *cli.Command {
 
 			_ = container.Stop()
 			_ = app.Shutdown()
-			_ = wsApp.Stop()
+			// _ = wsApp.Stop()
 
 			logger.Info(fmt.Sprintf(`%s instance "%s" was successful shutdown.`, config.App.Name, config.App.Instance))
 

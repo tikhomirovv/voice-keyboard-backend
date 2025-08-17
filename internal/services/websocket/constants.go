@@ -25,6 +25,8 @@ const (
 	ErrorCodeTranscriptionError = "TRANSCRIPTION_ERROR"
 	ErrorCodeInternalError      = "INTERNAL_ERROR"
 	ErrorCodeFormatError        = "FORMAT_ERROR"
+	ErrorCodeValidationError    = "VALIDATION_ERROR"
+	ErrorCodeLimitExceeded      = "LIMIT_EXCEEDED"
 
 	// Сообщения об ошибках
 	ErrorMessageInvalidMessageFormat       = "invalid message format"
@@ -59,6 +61,7 @@ const (
 	ErrorMessageAuthorizationRequired      = "authorization required"
 	ErrorMessageInvalidToken               = "invalid token"
 	ErrorMessageInvalidRequestBody         = "invalid request body"
+	ErrorMessageFailedToStopSession        = "failed to stop session"
 
 	// Форматы аудио
 	DefaultAudioFormat = "pcm16"
