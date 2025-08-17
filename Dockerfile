@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install required system packages
 RUN apk add --no-cache git make
@@ -16,20 +16,30 @@ RUN go mod download
 # Copy the source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/voice-key
+# Build the application with optimizations for production
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o /app/voice-key \
+    -trimpath
 
-# Final stage
-FROM alpine:3.19
+# Final stage - using distroless for smaller and more secure image
+FROM gcr.io/distroless/static-debian12:nonroot
 
-# Install ca-certificates for HTTPS requests
-RUN apk add --no-cache ca-certificates
+# Copy the binary
+COPY --from=builder /app/voice-key /app/voice-key
 
+# Create non-root user
+USER 65532:65532
+
+# Set working directory
 WORKDIR /app
 
-# Copy the binary and config
-COPY --from=builder /app/voice-key .
-COPY --from=builder /app/config.yml .
+# Expose ports
+EXPOSE 8080 8081
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ["/app/voice-key", "health:check"] || exit 1
 
 # Command to run
 ENTRYPOINT ["/app/voice-key"]

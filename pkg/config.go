@@ -19,7 +19,6 @@ type Config struct {
 	Auth       AuthConfig       `mapstructure:"auth"`
 	DesktopApp DesktopAppConfig `mapstructure:"desktop_app"`
 	WebSocket  WebSocketConfig  `mapstructure:"websocket"`
-	Connecte   ConnecteConfig   `mapstructure:"connecte"`
 	OpenAI     OpenAIConfig     `mapstructure:"openai"`
 	Releases   ReleasesConfig   `mapstructure:"releases"`
 }
@@ -90,11 +89,6 @@ type WebSocketConfig struct {
 	MaxSessionDuration    int    `mapstructure:"max_session_duration"`
 	IdleTimeout           int    `mapstructure:"idle_timeout"`
 	ConnectionTimeout     int    `mapstructure:"connection_timeout"`
-}
-
-type ConnecteConfig struct {
-	BaseUrl string `mapstructure:"base_url"`
-	Token   string `mapstructure:"token"`
 }
 
 type OpenAIConfig struct {

@@ -1,0 +1,61 @@
+version: "3.8"
+
+name: voice-key-backend-go-prod
+
+services:
+  # Database service
+  db:
+    container_name: voice-key-db
+    image: postgres:17.4-alpine3.21
+    restart: unless-stopped
+    networks:
+      - voice-key-prod
+    volumes:
+      - ./.docker/volumes/postgresql-prod:/var/lib/postgresql/data/pgdata
+      - ./.docker/volumes/pg-backups-prod:/backups
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Application service
+  app:
+    container_name: voice-key-app-prod
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - voice-key-prod
+    volumes:
+      - ./config.prod.yml:/app/config.yml:ro
+      - ./releases:/app/releases
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/voice-key", "health:check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  voice-key-prod:
+    name: voice-key-prod
+    driver: bridge
