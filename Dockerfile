@@ -43,10 +43,6 @@ WORKDIR /app
 # Expose ports
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["/app/voice-key", "health:check"] || exit 1
-
 # Command to run with dumb-init as PID 1
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["/app/voice-key", "app:start"]

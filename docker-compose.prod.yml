@@ -7,7 +7,7 @@ services:
     image: postgres:17.4-alpine3.21
     restart: unless-stopped
     networks:
-      - voice-key-prod
+      - traefik
     volumes:
       - ./.docker/volumes/postgresql-prod:/var/lib/postgresql/data/pgdata
       - ./.docker/volumes/pg-backups-prod:/backups
@@ -26,28 +26,34 @@ services:
       start_period: 40s
 
   # Application service
-  app:
-    container_name: voice-key-app-prod
-    build:
-      context: .
-      dockerfile: Dockerfile
+  spichki:
+    container_name: spichki-backend
+    image: registry.gitlab.com/voice-keyboard/backend/app:current
     restart: unless-stopped
     networks:
-      - voice-key-prod
+      - traefik
     volumes:
-      - ./config.prod.yml:/app/config.yml:ro
-      - ./releases:/app/releases
+      - /home/ops/services/voice-key/config.yml:/app/config.yml:ro
+      - /home/ops/services/voice-key/releases:/app/releases
     depends_on:
       db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "/app/voice-key", "health:check"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.spichki.rule=Host(`b.spichki.app`)
+      - traefik.http.routers.spichki.entrypoints=web,websecure
+      - traefik.http.routers.spichki.tls=true
+      - traefik.http.routers.spichki.tls.certresolver=production
+      - traefik.http.middlewares.spichki.headers.SSLRedirect=true
+      - traefik.http.middlewares.spichki.headers.STSSeconds=315360000
+      - traefik.http.middlewares.spichki.headers.browserXSSFilter=true
+      - traefik.http.middlewares.spichki.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.spichki.headers.forceSTSHeader=true
+      - traefik.http.middlewares.spichki.headers.SSLHost=spichki.app
+      - traefik.http.middlewares.spichki.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.spichki.headers.STSPreload=true
+      - traefik.http.routers.spichki.middlewares=spichki@docker
 
 networks:
-  voice-key-prod:
-    name: voice-key-prod
-    driver: bridge
+  traefik:
+    external: true

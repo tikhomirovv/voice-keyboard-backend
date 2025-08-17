@@ -25,7 +25,7 @@ app:
     - app
   variables:
     SSH_USER: !reference [.ssh-auth, variables, SSH_USER]
-    NETWORK_NAME: voice-key-network
+    NETWORK_NAME: traefik
     CONTAINER_NAME: voice-key-backend
     CONFIG_FILE: /home/ops/services/voice-key/config.yml
     RELEASE_DIR: /home/ops/services/voice-key/releases
@@ -43,6 +43,7 @@ app:
     # Запуск контейнера
     - ssh $SSH_USER@$IP "
       docker pull $IMAGE_NAME:$TAG &&
+      docker tag $IMAGE_NAME:$TAG $IMAGE_NAME:current &&
       docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || true &&
       docker run -d
       --restart=always
@@ -60,7 +61,7 @@ app:
 production:
   environment:
     name: production
-    url: https://voice-key.example.com
+    url: https://b.spichki.app
   variables:
     IP: "$IP_VDSINA"
     SSH_PRIVATE_KEY: "$SSH_PK_VDSINA"
