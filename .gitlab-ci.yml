@@ -25,9 +25,10 @@ app:
     - app
   variables:
     SSH_USER: !reference [.ssh-auth, variables, SSH_USER]
-    NETWORK_NAME: voice-key-prod
-    CONTAINER_NAME: voice-key-app
-    CONFIG_FILE: /var/config/voice-key/config.yml
+    NETWORK_NAME: voice-key-network
+    CONTAINER_NAME: voice-key-backend
+    CONFIG_FILE: /home/ops/services/voice-key/config.yml
+    RELEASE_DIR: /home/ops/services/voice-key/releases
   before_script:
     - !reference [.ssh-auth, before_script]
   script:
@@ -48,7 +49,7 @@ app:
       --name=$CONTAINER_NAME
       --network=$NETWORK_NAME
       -v $CONFIG_FILE:/app/config.yml:ro
-      -v /var/voice-key/releases:/app/releases
+      -v $RELEASE_DIR:/app/releases
       $IMAGE_NAME:$TAG
       "
 
@@ -66,5 +67,5 @@ production:
     SSH_PRIVATE_KEY: "$SSH_PK_PRODUCTION"
   extends: .deploy
   when: manual
-  only:
-    - tags
+  # only:
+  # - tags
