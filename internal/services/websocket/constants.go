@@ -4,9 +4,6 @@ import "time"
 
 // WebSocket константы
 const (
-	// Размеры буферов для WebSocket соединения
-	WebSocketReadBufferSize  = 1024
-	WebSocketWriteBufferSize = 1024
 
 	// Таймауты
 	GracefulCloseTimeout     = 2 * time.Second

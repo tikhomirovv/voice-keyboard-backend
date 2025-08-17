@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	"gitlab.com/voice-keyboard/backend-go/internal/dto"
 	"gitlab.com/voice-keyboard/backend-go/internal/interfaces"
@@ -46,14 +45,43 @@ type FiberHandler struct {
 	validator   *validator.Validate
 }
 
+// GetSessionsCount возвращает количество активных сессий
+func (h *FiberHandler) GetSessionsCount() int {
+	h.sessionMutex.RLock()
+	defer h.sessionMutex.RUnlock()
+	return len(h.sessions)
+}
+
+// GetUsersCount возвращает количество пользователей с активными сессиями
+func (h *FiberHandler) GetUsersCount() int {
+	h.sessionMutex.RLock()
+	defer h.sessionMutex.RUnlock()
+	return len(h.userSessions)
+}
+
+// GetSessionsInfo возвращает информацию о сессиях для мониторинга
+func (h *FiberHandler) GetSessionsInfo() map[string]interface{} {
+	h.sessionMutex.RLock()
+	defer h.sessionMutex.RUnlock()
+
+	info := make(map[string]interface{})
+	for sessionID, session := range h.sessions {
+		info[sessionID] = map[string]interface{}{
+			"userID":           session.UserID,
+			"startTime":        session.StartTime,
+			"lastActivityTime": session.LastActivityTime,
+			"started":          session.Started,
+			"format":           session.AudioOptions.SampleFormat,
+			"sampleRate":       session.AudioOptions.SampleRate,
+		}
+	}
+
+	return info
+}
+
 // NewFiberHandler создает новый WebSocket обработчик для Fiber
-func NewFiberHandler(c *pkg.Container) *FiberHandler {
-	// Создаем сервисы для обработки WebSocket сообщений
-	processor := NewRealtimeWebSocketService(
-		c.Logger,
-		c.RealtimeTranscriberService,
-		c.OpenAITextGenerationService,
-	)
+func NewFiberHandler(c *pkg.Container, processor interfaces.WebSocketProcessorInterface) *FiberHandler {
+	// Используем предоставленный процессор для обработки WebSocket сообщений
 
 	return &FiberHandler{
 		config:       c.Config,
@@ -66,48 +94,10 @@ func NewFiberHandler(c *pkg.Container) *FiberHandler {
 	}
 }
 
-// RegisterRoutes регистрирует WebSocket маршруты в Fiber приложении
-func (h *FiberHandler) RegisterRoutes(app fiber.Router) {
-	// WebSocket middleware для проверки авторизации
-	wsMiddleware := func(c *fiber.Ctx) error {
-		// Проверка авторизации по заголовку Authorization
-		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Authorization required",
-			})
-		}
+// Методы для обработки WebSocket находятся в WebSocketController
 
-		// Обычно заголовок имеет формат "Bearer <token>"
-		tokenString := authHeader[7:] // Удаляем "Bearer "
-		userID, err := h.validateToken(tokenString)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid token: " + err.Error(),
-			})
-		}
-
-		// Сохраняем userID в контексте для использования в WebSocket обработчике
-		c.Locals("userID", userID)
-		return c.Next()
-	}
-
-	// WebSocket обработчик для аудио
-	wsHandler := websocket.New(h.handleWebSocket, websocket.Config{
-		ReadBufferSize:  WebSocketReadBufferSize,
-		WriteBufferSize: WebSocketWriteBufferSize,
-	})
-
-	// Регистрируем маршруты
-	app.Get(h.config.WebSocket.Path, wsMiddleware, wsHandler)
-
-	// Мониторинг маршруты (если нужны)
-	app.Get("/ws-monitor", h.handleMonitorPage)
-	app.Get("/ws-monitor/data", h.handleMonitorData)
-}
-
-// handleWebSocket обрабатывает WebSocket соединение
-func (h *FiberHandler) handleWebSocket(c *websocket.Conn) {
+// HandleWebSocket обрабатывает WebSocket соединение
+func (h *FiberHandler) HandleWebSocket(c *websocket.Conn) {
 	// Получаем userID из контекста
 	userID, ok := c.Locals("userID").(uint64)
 	if !ok {
@@ -609,42 +599,4 @@ func (h *FiberHandler) waitForSubscriptionStatus(session *FiberWSSession) bool {
 	}
 }
 
-// handleMonitorPage обрабатывает страницу мониторинга
-func (h *FiberHandler) handleMonitorPage(c *fiber.Ctx) error {
-	// Простая HTML страница для мониторинга
-	html := `
-	<!DOCTYPE html>
-	<html>
-	<head>
-		<title>WebSocket Monitor</title>
-	</head>
-	<body>
-		<h1>WebSocket Monitor</h1>
-		<div id="data"></div>
-		<script>
-			fetch('/ws-monitor/data')
-				.then(response => response.json())
-				.then(data => {
-					document.getElementById('data').innerHTML = JSON.stringify(data, null, 2);
-				});
-		</script>
-	</body>
-	</html>
-	`
-	return c.Type("html").SendString(html)
-}
-
-// handleMonitorData возвращает данные мониторинга
-func (h *FiberHandler) handleMonitorData(c *fiber.Ctx) error {
-	h.sessionMutex.RLock()
-	defer h.sessionMutex.RUnlock()
-
-	data := fiber.Map{
-		"active_sessions": len(h.sessions),
-		"active_users":    len(h.userSessions),
-		"sessions":        h.sessions,
-		"user_sessions":   h.userSessions,
-	}
-
-	return c.JSON(data)
-}
+// Методы мониторинга перенесены в WebSocketController

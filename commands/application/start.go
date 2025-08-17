@@ -12,7 +12,6 @@ import (
 	"gitlab.com/voice-keyboard/backend-go/healthcheck"
 	"gitlab.com/voice-keyboard/backend-go/internal/controllers"
 	"gitlab.com/voice-keyboard/backend-go/internal/routers"
-	"gitlab.com/voice-keyboard/backend-go/internal/services/websocket"
 	"gitlab.com/voice-keyboard/backend-go/pkg"
 )
 
@@ -68,9 +67,9 @@ func NewApplicationStartCommand() *cli.Command {
 			//         logger.Error(fmt.Sprintf("Failed to start WebSocket server: %v", err))
 			//     }
 			// }()
-			// Создание и регистрация WebSocket обработчика для Fiber
-			wsHandler := websocket.NewFiberHandler(container)
-			wsHandler.RegisterRoutes(app)
+			// Регистрация WebSocket роутера и контроллера
+			wsRouter := routers.NewWebSocketRouter(app, container)
+			controllers.RegisterWebSocketController(wsRouter, container)
 
 			logger.Info(fmt.Sprintf(`%s instance "%s" started`, config.App.Name, config.App.Instance))
 

@@ -56,8 +56,8 @@ func NewServer(c *pkg.Container) *Server {
 		config: c.Config,
 		logger: c.Logger,
 		upgrader: websocket.Upgrader{
-			ReadBufferSize:  WebSocketReadBufferSize,
-			WriteBufferSize: WebSocketWriteBufferSize,
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
 			CheckOrigin: func(r *http.Request) bool {
 				// Здесь может быть проверка origin
 				return true
