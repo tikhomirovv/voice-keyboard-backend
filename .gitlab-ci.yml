@@ -45,7 +45,7 @@ app:
       docker pull $IMAGE_NAME:$TAG &&
       docker tag $IMAGE_NAME:$TAG $IMAGE_NAME:current &&
       docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || true &&
-      cd /home/ops/services/voice-key && docker compose up -d
+      cd /home/ops/services/voice-key && docker compose down && docker compose up -d
       "
       # docker run -d
       # --restart=always
