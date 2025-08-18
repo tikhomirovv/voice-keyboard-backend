@@ -26,7 +26,7 @@ app:
   variables:
     SSH_USER: !reference [.ssh-auth, variables, SSH_USER]
     NETWORK_NAME: traefik
-    CONTAINER_NAME: voice-key-backend
+    CONTAINER_NAME: spichki-backend
     CONFIG_FILE: /home/ops/services/voice-key/config.yml
     RELEASE_DIR: /home/ops/services/voice-key/releases
   before_script:
