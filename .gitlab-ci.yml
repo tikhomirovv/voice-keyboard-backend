@@ -45,14 +45,15 @@ app:
       docker pull $IMAGE_NAME:$TAG &&
       docker tag $IMAGE_NAME:$TAG $IMAGE_NAME:current &&
       docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || true &&
-      docker run -d
-      --restart=always
-      --name=$CONTAINER_NAME
-      --network=$NETWORK_NAME
-      -v $CONFIG_FILE:/app/config.yml:ro
-      -v $RELEASE_DIR:/app/releases
-      $IMAGE_NAME:$TAG
+      cd /home/ops/services/voice-key && docker compose up -d
       "
+      # docker run -d
+      # --restart=always
+      # --name=$CONTAINER_NAME
+      # --network=$NETWORK_NAME
+      # -v $CONFIG_FILE:/app/config.yml:ro
+      # -v $RELEASE_DIR:/app/releases
+      # $IMAGE_NAME:$TAG
 
     # Выполнение миграций
     - ssh $SSH_USER@$IP "docker exec $CONTAINER_NAME /app/voice-key database:migrations:migrate"
