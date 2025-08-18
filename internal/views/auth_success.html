@@ -1,5 +1,5 @@
-{{template "base" .}} {{define "title"}}Успешная авторизация{{end}} {{define
-"styles"}}{{end}} {{define "content"}}
+{{define "title"}}Успешная авторизация{{end}}
+
 <div class="flex items-center justify-center">
   <div
     class="max-w-md w-full bg-white rounded-xl shadow-md overflow-hidden p-8 text-center"
@@ -16,11 +16,10 @@
     </button>
   </div>
 </div>
-{{end}} {{define "scripts"}}
+
 <script>
   function openDesktopApp() {
     window.location.href =
       "{{.AppScheme}}{{.AppPath}}?access_token={{.AccessToken}}&refresh_token={{.RefreshToken}}";
   }
 </script>
-{{end}}

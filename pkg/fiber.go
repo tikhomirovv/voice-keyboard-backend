@@ -28,7 +28,8 @@ func NewApp(container *Container) *fiber.App {
 		ErrorHandler: errHandler.HandleError,
 		Prefork:      config.App.Prefork,
 		// Подключаем движок шаблонов
-		Views: engine,
+		Views:       engine,
+		ViewsLayout: "layouts/base",
 	})
 	app.Use(recover.New())
 	if config.Cors.Enabled {

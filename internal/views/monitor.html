@@ -1,5 +1,4 @@
-{{template "base" .}} {{define "title"}}WebSocket Monitor{{end}} {{define
-"styles"}}
+{{define "title"}}WebSocket Monitor{{end}}
 <style>
   table {
     @apply w-full border-collapse min-w-full mb-6;
@@ -18,7 +17,7 @@
     @apply text-center text-gray-500;
   }
 </style>
-{{end}} {{define "content"}}
+
 <div class="max-w-screen-xl">
   <h1 class="text-2xl font-bold mb-6">WebSocket Sessions Monitor</h1>
 
@@ -116,7 +115,7 @@
     Last updated: <span id="last-update">Never</span>
   </div>
 </div>
-{{end}} {{define "scripts"}}
+
 <script>
   let refreshInterval;
   const autoRefreshCheckbox = document.getElementById("auto-refresh");
@@ -201,4 +200,3 @@
   fetchData();
   updateRefreshInterval();
 </script>
-{{end}}
