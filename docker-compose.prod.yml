@@ -26,33 +26,33 @@ services:
       start_period: 40s
 
   # Application service
-  spichki:
-    container_name: spichki-backend
+  backend:
+    container_name: backend
     image: registry.gitlab.com/voice-keyboard/backend/app:current
     restart: unless-stopped
     networks:
       - traefik
     volumes:
-      - /home/ops/services/voice-key/config.yml:/app/config.yml:ro
-      - /home/ops/services/voice-key/releases:/app/releases
+      - /opt/app/config.yml:/app/config.yml:ro
+      - /opt/app/releases:/app/releases
     depends_on:
       db:
         condition: service_healthy
     labels:
       - traefik.enable=true
-      - traefik.http.routers.spichki.rule=Host(`b.spichki.app`)
-      - traefik.http.routers.spichki.entrypoints=web,websecure
-      - traefik.http.routers.spichki.tls=true
-      - traefik.http.routers.spichki.tls.certresolver=production
-      - traefik.http.middlewares.spichki.headers.SSLRedirect=true
-      - traefik.http.middlewares.spichki.headers.STSSeconds=315360000
-      - traefik.http.middlewares.spichki.headers.browserXSSFilter=true
-      - traefik.http.middlewares.spichki.headers.contentTypeNosniff=true
-      - traefik.http.middlewares.spichki.headers.forceSTSHeader=true
-      - traefik.http.middlewares.spichki.headers.SSLHost=spichki.app
-      - traefik.http.middlewares.spichki.headers.STSIncludeSubdomains=true
-      - traefik.http.middlewares.spichki.headers.STSPreload=true
-      - traefik.http.routers.spichki.middlewares=spichki@docker
+      - traefik.http.routers.backend.rule=Host(`example.com`)
+      - traefik.http.routers.backend.entrypoints=web,websecure
+      - traefik.http.routers.backend.tls=true
+      - traefik.http.routers.backend.tls.certresolver=production
+      - traefik.http.middlewares.backend.headers.SSLRedirect=true
+      - traefik.http.middlewares.backend.headers.STSSeconds=315360000
+      - traefik.http.middlewares.backend.headers.browserXSSFilter=true
+      - traefik.http.middlewares.backend.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.backend.headers.forceSTSHeader=true
+      - traefik.http.middlewares.backend.headers.SSLHost=example.com
+      - traefik.http.middlewares.backend.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.backend.headers.STSPreload=true
+      - traefik.http.routers.backend.middlewares=backend@docker
 
 networks:
   traefik:

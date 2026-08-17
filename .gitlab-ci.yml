@@ -18,7 +18,7 @@ app:
     - !reference [.job-build, script]
   when: manual
 
-# Шаблон для деплоя
+# Deploy job template
 .deploy:
   stage: deploy
   needs:
@@ -26,26 +26,26 @@ app:
   variables:
     SSH_USER: !reference [.ssh-auth, variables, SSH_USER]
     NETWORK_NAME: traefik
-    CONTAINER_NAME: spichki-backend
-    CONFIG_FILE: /home/ops/services/voice-key/config.yml
-    RELEASE_DIR: /home/ops/services/voice-key/releases
+    CONTAINER_NAME: backend
+    CONFIG_FILE: /opt/app/config.yml
+    RELEASE_DIR: /opt/app/releases
   before_script:
     - !reference [.ssh-auth, before_script]
   script:
     - echo "Deploying application to $IP"
 
-    # Копирование конфигурационных файлов
+    # Copy config files
     # - echo "$CONFIG_VARIABLES" | base64 -d > config.yml && scp config.yml $SSH_USER@$IP:"$CONFIG_FILE" && rm config.yml
 
-    # Логин в реестр GitLab
+    # Login to GitLab registry
     - ssh $SSH_USER@$IP "docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY"
 
-    # Запуск контейнера
+    # Restart containers
     - ssh $SSH_USER@$IP "
       docker pull $IMAGE_NAME:$TAG &&
       docker tag $IMAGE_NAME:$TAG $IMAGE_NAME:current &&
       docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || true &&
-      cd /home/ops/services/voice-key && docker compose down && docker compose up -d
+      cd /opt/app && docker compose down && docker compose up -d
       "
       # docker run -d
       # --restart=always
@@ -55,17 +55,17 @@ app:
       # -v $RELEASE_DIR:/app/releases
       # $IMAGE_NAME:$TAG
 
-    # Выполнение миграций
+    # Run migrations
     - ssh $SSH_USER@$IP "docker exec $CONTAINER_NAME /app/voice-key database:migrations:migrate"
   allow_failure: false
 
 production:
   environment:
     name: production
-    url: https://b.spichki.app
+    url: https://example.com
   variables:
-    IP: "$IP_VDSINA"
-    SSH_PRIVATE_KEY: "$SSH_PK_VDSINA"
+    IP: "$DEPLOY_HOST"
+    SSH_PRIVATE_KEY: "$SSH_PRIVATE_KEY_PRODUCTION"
   extends: .deploy
   when: manual
   # only:
